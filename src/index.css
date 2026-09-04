@@ -1,0 +1,98 @@
+@import url('https://fonts.googleapis.com/css2?family=Nunito+Sans:wght@400;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Токены палитры — CSS-переменные, не хардкод в tailwind.config.js, чтобы
+ * их можно было переопределить внутри .dark (сейчас только на странице
+ * «Заявки», см. LeadsPage.jsx — переключатель ставит класс dark на <html>,
+ * пока открыта эта страница, и снимает при уходе с неё/выключении).
+ * .dark переопределяет только сами переменные — ни один компонент дальше
+ * по коду не знает о тёмной теме, просто продолжает использовать
+ * bg-surface/text-text/border-border и т.п.
+ *
+ * Значения — «R G B» через пробел, БЕЗ rgb() — tailwind.config.js сам
+ * оборачивает в rgb(var(...) / <alpha-value>), это и даёт работающие
+ * классы вида bg-success/10, ring-navy/40 (обычный var(#hex) без такой
+ * обёртки их ломает — Tailwind не режет CSS-переменную на RGB-каналы на
+ * этапе сборки, только литеральный hex/rgb).
+ */
+:root {
+  --color-bg: 244 245 247;
+  --color-surface: 255 255 255;
+  --color-surface-alt: 250 251 252;
+  --color-border: 233 235 239;
+  --color-border-strong: 214 218 225;
+  --color-text: 43 52 64;
+  --color-muted: 139 148 163;
+  --color-navy: 34 64 107;
+  --color-navy-hover: 26 51 87;
+  --color-navy-num: 47 111 228;
+  --color-orange: 229 132 43;
+  --color-orange-soft: 253 240 227;
+  --color-success: 52 168 83;
+  --color-success-bg: 235 247 238;
+  --color-danger: 192 57 43;
+  --color-danger-bg: 176 45 51;
+  --color-present: 62 139 132;
+  --color-absent: 47 128 216;
+  --color-link: 37 99 235;
+  --color-freeze-blue: 234 243 255;
+  --color-freeze-yellow: 255 246 217;
+  --color-freeze-red: 251 234 234;
+}
+
+.dark {
+  --color-bg: 16 21 29;
+  --color-surface: 27 35 48;
+  --color-surface-alt: 34 43 58;
+  --color-border: 46 57 72;
+  --color-border-strong: 61 74 92;
+  --color-text: 231 234 238;
+  --color-muted: 154 163 178;
+  --color-navy: 62 107 168;
+  --color-navy-hover: 78 125 188;
+  --color-navy-num: 91 143 242;
+  --color-orange: 229 132 43;
+  --color-orange-soft: 58 42 23;
+  --color-success: 62 196 109;
+  --color-success-bg: 22 50 31;
+  --color-danger: 224 86 74;
+  --color-danger-bg: 74 30 27;
+  --color-present: 79 166 158;
+  --color-absent: 74 151 232;
+  --color-link: 108 155 255;
+  --color-freeze-blue: 27 42 61;
+  --color-freeze-yellow: 51 48 26;
+  --color-freeze-red: 58 31 32;
+}
+
+body {
+  /* @apply, не theme('colors.bg') — bg/text теперь rgb(var(...) /
+     <alpha-value>), а theme() внутри голого CSS-правила не подставляет
+     <alpha-value> (это делает только генератор классов), получился бы
+     невалидный CSS. @apply идёt через тот же генератор, что и обычный
+     className — подставляет альфу как надо. */
+  margin: 0;
+  @apply bg-bg text-text;
+  font-family: theme('fontFamily.sans');
+}
+
+* {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Нативный индикатор растянут на всё поле — клик в любом месте открывает
+   календарь, не только по крошечной иконке браузера в углу. */
+.date-input::-webkit-calendar-picker-indicator {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  opacity: 0;
+  cursor: pointer;
+}
