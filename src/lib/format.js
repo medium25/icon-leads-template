@@ -42,6 +42,7 @@ const SOURCE_LABELS = {
   telegram: 'Telegram',
   friends: 'Друзья',
   outdoor: 'Наружная реклама',
+  vacancy_form: 'Заявка на вакансию',
 };
 
 /**

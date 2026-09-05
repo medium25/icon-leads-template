@@ -587,6 +587,22 @@ export function LeadCard({
         </div>
       </div>
 
+      {/* Заявки на вакансию (appsscript/VacancyLeadsSync.gs) несут вместо
+          обычных lead-полей название вакансии и ответы формы — показываем
+          их прямо на карточке (не за попапом ⓘ, как infoItems), сразу под
+          именем/телефоном. */}
+      {lead.vacancyName && <p className="-mt-1 truncate text-[12px] font-bold text-navy">{lead.vacancyName}</p>}
+      {lead.formAnswers?.length > 0 && (
+        <div className="flex flex-col gap-1 border-b border-border pb-2" onClick={(e) => e.stopPropagation()}>
+          {lead.formAnswers.map((qa, i) => (
+            <p key={i} className="text-[12px] leading-snug">
+              <span className="text-muted">{qa.question}: </span>
+              <span className="text-text">{qa.answer}</span>
+            </p>
+          ))}
+        </div>
+      )}
+
       {(stage === 'new' || stage === 'calling') && (
         <div onClick={(e) => e.stopPropagation()}>
           <CallAttemptDots attempts={attempts} onMark={(result) => onMarkAttempt(lead, result)} nextCallDueAt={lead.nextCallDueAt} />
