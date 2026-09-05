@@ -120,8 +120,8 @@ export const STAGE_COLOR_SWATCHES = [
 /**
  * Применяет пользовательские правки названия/цвета стадии (см.
  * `settings/{branchId}.leadStageOverrides`, редактируется через ⚙ в
- * заголовке колонки) поверх дефолтных COLUMNS. Ключ и порядок стадий
- * править нельзя — только `label` и `color`, чтобы не сломать
+ * заголовке колонки) поверх дефолтных COLUMNS. Ключ и порядок этих 7
+ * стадий править нельзя — только `label` и `color`, чтобы не сломать
  * `isForwardAllowed`/`stageDeadline`, которые матчатся на `key`.
  * @param {Record<string, {label?: string, color?: string}>} [overrides]
  * @returns {typeof COLUMNS}
@@ -129,6 +129,39 @@ export const STAGE_COLOR_SWATCHES = [
 export function withStageOverrides(overrides) {
   if (!overrides) return COLUMNS;
   return COLUMNS.map((c) => (overrides[c.key] ? { ...c, ...overrides[c.key] } : c));
+}
+
+/** Префикс ключа пользовательских колонок — отличает их от 7 встроенных стадий воронки. */
+export const CUSTOM_STAGE_PREFIX = 'custom_';
+
+// Firestore where(...,'in',...) принимает не больше 10 значений; leadsQuery
+// в LeadsPage.jsx фильтрует по всем ключам колонок разом, поэтому
+// 7 встроенных + MAX_CUSTOM_STAGES не должны превышать 10.
+export const MAX_CUSTOM_STAGES = 3;
+
+/** @param {string} key @returns {boolean} */
+export function isCustomStageKey(key) {
+  return key.startsWith(CUSTOM_STAGE_PREFIX);
+}
+
+/**
+ * Полный список колонок доски: 7 встроенных стадий (с пользовательскими
+ * label/color, см. withStageOverrides) плюс пользовательские колонки
+ * (`settings/{branchId}.customStages`) — вставляются перед «Оплачено».
+ * У пользовательских колонок нет своей бизнес-логики (SLA/дедлайны/
+ * подсказки) — просто место, куда можно перетащить карточку вручную, см.
+ * isForwardAllowed и stageDeadline (там для незнакомого ключа — null).
+ * @param {{leadStageOverrides?: Record<string, {label?: string, color?: string}>, customStages?: Array<{key: string, label: string, color: string}>}} [settings]
+ * @returns {typeof COLUMNS}
+ */
+export function resolveColumns(settings) {
+  const base = withStageOverrides(settings?.leadStageOverrides);
+  const customStages = settings?.customStages ?? [];
+  if (customStages.length === 0) return base;
+  const wonIndex = base.findIndex((c) => c.key === 'won');
+  const result = [...base];
+  result.splice(wonIndex, 0, ...customStages.map((s) => ({ ...s, hint: null, isCustom: true })));
+  return result;
 }
 
 /**
@@ -151,16 +184,20 @@ const FORWARD_TRANSITIONS = {
  * funnelStage (до миграции, см. scripts/backfill-funnel-stage.mjs) и для
  * newly-created документов до записи поля.
  * @param {Object} lead
- * @returns {string} один из ключей COLUMNS
+ * @param {typeof COLUMNS} [columns] полный список колонок (с пользовательскими), см. resolveColumns
+ * @returns {string} один из ключей columns
  */
-export function columnKeyOf(lead) {
-  return COLUMNS.some((c) => c.key === lead.funnelStage) ? lead.funnelStage : 'new';
+export function columnKeyOf(lead, columns = COLUMNS) {
+  return columns.some((c) => c.key === lead.funnelStage) ? lead.funnelStage : 'new';
 }
 
 /**
  * Разрешён ли переход `from → to`: см. FORWARD_TRANSITIONS, либо в 'lost'
  * из любой нетерминальной стадии. 'won'/'lost' — терминальные, из них
- * переходов нет вовсе.
+ * переходов нет вовсе. Пользовательские колонки (см. isCustomStageKey) не
+ * участвуют в графе FORWARD_TRANSITIONS — переход в них или из них
+ * разрешён с/на любую другую нетерминальную колонку, у них нет своего
+ * порядка в воронке.
  * @param {string} from
  * @param {string} to
  * @returns {boolean}
@@ -168,5 +205,6 @@ export function columnKeyOf(lead) {
 export function isForwardAllowed(from, to) {
   if (from === 'won' || from === 'lost') return false;
   if (to === 'lost') return true;
+  if (isCustomStageKey(from) || isCustomStageKey(to)) return from !== to;
   return (FORWARD_TRANSITIONS[from] ?? []).includes(to);
 }

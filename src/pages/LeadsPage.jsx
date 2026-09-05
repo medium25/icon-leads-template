@@ -1,7 +1,7 @@
 // src/pages/LeadsPage.jsx
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Moon, Sun } from 'lucide-react';
+import { Moon, Sun, Plus } from 'lucide-react';
 import { collection, doc, query, where, orderBy, onSnapshot, updateDoc, setDoc, writeBatch, serverTimestamp, increment } from 'firebase/firestore';
 import { db } from '../firebase.js';
 import { useBranch } from '../hooks/useBranch.js';
@@ -20,16 +20,113 @@ import { CallSuccessOutcomeModal } from '../components/leads/CallSuccessOutcomeM
 import { GroupBookingModal } from '../components/leads/GroupBookingModal.jsx';
 import { LeadColumn } from '../components/leads/LeadColumn.jsx';
 import { DropdownMenu } from '../components/ui/DropdownMenu.jsx';
-import { COLUMNS, columnKeyOf, isForwardAllowed, withStageOverrides } from '../components/leads/columns.js';
+import { columnKeyOf, isForwardAllowed, resolveColumns, isCustomStageKey, CUSTOM_STAGE_PREFIX, MAX_CUSTOM_STAGES, STAGE_COLOR_SWATCHES } from '../components/leads/columns.js';
 import { checklistPercent } from '../lib/leadChecklist.js';
 import { advanceStage, nextCallDueAt, firstTouchDueAt, secondTouchDueAt, unreachableCallDueAt, validateCallDeadline } from '../lib/leadFunnel.js';
 import { playNewLeadChime } from '../lib/notificationSound.js';
 
 /**
- * Заявки — 7-стадийная воронка продаж (2026-08-13-leads-funnel-redesign.md).
- * Перенос между стадиями — только вперёд (drag-n-drop или кнопка «→»),
- * кроме «Отказ» — туда можно с любой нетерминальной стадии. Клик по
- * карточке — на `/students/:id`.
+ * Кнопка в конце ряда колонок — добавляет пользовательскую колонку
+ * (settings/{branchId}.customStages, см. addCustomStage в LeadsPage). Без
+ * своей бизнес-логики (SLA/дедлайны) — просто место для ручного переноса
+ * карточек, поэтому весь попап — только название и цвет, без подсказок.
+ * @param {{onAdd: (label: string, color: string) => void, disabled: boolean}} props
+ */
+function AddColumnButton({ onAdd, disabled }) {
+  const [open, setOpen] = useState(false);
+  const [label, setLabel] = useState('');
+  const [color, setColor] = useState(STAGE_COLOR_SWATCHES[0]);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onClickOutside = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    };
+    const onKeyDown = (e) => e.key === 'Escape' && setOpen(false);
+    document.addEventListener('mousedown', onClickOutside);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onClickOutside);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [open]);
+
+  const save = () => {
+    const trimmed = label.trim();
+    if (!trimmed) return;
+    onAdd(trimmed, color);
+    setLabel('');
+    setColor(STAGE_COLOR_SWATCHES[0]);
+    setOpen(false);
+  };
+
+  return (
+    <div ref={ref} className="relative w-11 shrink-0">
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        disabled={disabled}
+        title={disabled ? `Больше ${MAX_CUSTOM_STAGES} своих колонок нельзя` : 'Добавить колонку'}
+        className="flex h-11 w-11 items-center justify-center rounded-card bg-surface-alt text-muted hover:bg-surface hover:text-navy disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        <Plus className="h-5 w-5" />
+      </button>
+      {open && (
+        <div className="absolute left-0 top-12 z-20 w-64 rounded-field border border-border bg-surface p-3 text-left shadow-hover">
+          <label className="mb-2 block">
+            <span className="mb-1 block text-[12px] text-muted">Название колонки</span>
+            <input
+              autoFocus
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && save()}
+              className="h-9 w-full rounded-field border border-border-strong bg-white px-2.5 text-[13px] text-text focus:border-navy focus:outline-none"
+            />
+          </label>
+          <span className="mb-1 block text-[12px] text-muted">Цвет</span>
+          <div className="mb-3 flex flex-wrap gap-1.5">
+            {STAGE_COLOR_SWATCHES.map((c) => (
+              <button
+                key={c}
+                type="button"
+                onClick={() => setColor(c)}
+                aria-label={c}
+                className={`h-6 w-6 rounded-full ${color === c ? 'ring-2 ring-navy ring-offset-1' : ''}`}
+                style={{ backgroundColor: c }}
+              />
+            ))}
+          </div>
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="rounded-field px-2.5 py-1.5 text-[12px] text-muted hover:bg-surface-alt"
+            >
+              Отмена
+            </button>
+            <button
+              type="button"
+              onClick={save}
+              className="rounded-field bg-navy px-2.5 py-1.5 text-[12px] font-bold text-white hover:bg-navy-hover"
+            >
+              Добавить
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Заявки — 7-стадийная воронка продаж (2026-08-13-leads-funnel-redesign.md)
+ * плюс до {@link MAX_CUSTOM_STAGES} пользовательских колонок без своей
+ * логики (см. resolveColumns/addCustomStage). Перенос между встроенными
+ * стадиями — только вперёд (drag-n-drop или кнопка «→»), кроме «Отказ» —
+ * туда можно с любой нетерминальной стадии; в пользовательские колонки и
+ * обратно перенос свободный в любую сторону (см. isForwardAllowed). Клик
+ * по карточке — на `/students/:id`.
  */
 export function LeadsPage() {
   const navigate = useNavigate();
@@ -64,18 +161,34 @@ export function LeadsPage() {
     return () => clearInterval(id);
   }, []);
 
+  // Название и цвет 7 встроенных стадий редактируются через ⚙ в заголовке
+  // колонки и хранятся per-branch, а не в самом COLUMNS — ключ и порядок
+  // этих 7 стадий фиксированы (на них завязаны isForwardAllowed/
+  // stageDeadline/markAttempt), правится только то, что видит оператор.
+  // Плюс пользовательские колонки (customStages) — у них ни ключ, ни
+  // порядок ничем не завязаны, поэтому их можно свободно добавлять/
+  // переименовывать/удалять, см. addCustomStage/deleteCustomStage ниже.
+  // Читается здесь же (не только ниже) — resolvedColumns нужен уже
+  // leadsQuery, чтобы её ключи фильтровали Firestore-запрос.
+  const branchSettingsRef = useMemo(() => (db && activeBranchId ? doc(db, 'settings', activeBranchId) : null), [activeBranchId]);
+  const { data: branchSettings } = useDoc(branchSettingsRef);
+  const resolvedColumns = useMemo(() => resolveColumns(branchSettings), [branchSettings]);
+  const resolvedColumnKeys = useMemo(() => resolvedColumns.map((c) => c.key), [resolvedColumns]);
+
   const leadsQuery = useMemo(
     () =>
+      // Firestore 'in' — не больше 10 значений; 7 встроенных стадий +
+      // пользовательские колонки (максимум 3, см. addCustomStage) укладываются.
       db && activeBranchId
         ? query(
             collection(db, 'students'),
             where('branchId', '==', activeBranchId),
             where('isArchived', '==', false),
-            where('funnelStage', 'in', COLUMNS.map((c) => c.key)),
+            where('funnelStage', 'in', resolvedColumnKeys),
             orderBy('createdAt', 'desc'),
           )
         : null,
-    [activeBranchId],
+    [activeBranchId, resolvedColumnKeys],
   );
   const { data: allLeads } = useCollection(leadsQuery);
 
@@ -99,21 +212,43 @@ export function LeadsPage() {
     });
   }, [leadsQuery]);
 
-  // Название и цвет стадии редактируются через ⚙ в заголовке колонки и
-  // хранятся per-branch, а не в самом COLUMNS — ключ и порядок стадий
-  // остаются фиксированными (на них завязаны isForwardAllowed/
-  // stageDeadline/markAttempt), правится только то, что видит оператор.
-  const branchSettingsRef = useMemo(() => (db && activeBranchId ? doc(db, 'settings', activeBranchId) : null), [activeBranchId]);
-  const { data: branchSettings } = useDoc(branchSettingsRef);
-  const resolvedColumns = useMemo(() => withStageOverrides(branchSettings?.leadStageOverrides), [branchSettings]);
-
   const editStageColumn = (stageKey, patch) => {
     if (!branchSettingsRef) return;
+    if (isCustomStageKey(stageKey)) {
+      const customStages = (branchSettings?.customStages ?? []).map((s) => (s.key === stageKey ? { ...s, ...patch } : s));
+      setDoc(branchSettingsRef, { customStages }, { merge: true }).catch(() => showToast('Не удалось сохранить колонку.', { type: 'error' }));
+      return;
+    }
     // set+merge, не update — settings/{branchId} может ещё не существовать
     // (создаётся лениво при первом сохранении любой из его настроек), а
     // merge на вложенный объект сохраняет overrides остальных стадий как есть.
     setDoc(branchSettingsRef, { leadStageOverrides: { [stageKey]: patch } }, { merge: true }).catch(() =>
       showToast('Не удалось сохранить стадию.', { type: 'error' }),
+    );
+  };
+
+  const addCustomStage = (label, color) => {
+    if (!branchSettingsRef) return;
+    const existing = branchSettings?.customStages ?? [];
+    if (existing.length >= MAX_CUSTOM_STAGES) {
+      showToast(`Больше ${MAX_CUSTOM_STAGES} своих колонок нельзя — ограничение Firestore-запроса.`, { type: 'error' });
+      return;
+    }
+    const key = `${CUSTOM_STAGE_PREFIX}${Date.now().toString(36)}${Math.floor(Math.random() * 1000).toString(36)}`;
+    setDoc(branchSettingsRef, { customStages: [...existing, { key, label, color }] }, { merge: true }).catch(() =>
+      showToast('Не удалось добавить колонку.', { type: 'error' }),
+    );
+  };
+
+  const deleteCustomStage = (stageKey) => {
+    if (!branchSettingsRef) return;
+    if (leads.some((l) => columnKeyOf(l, resolvedColumns) === stageKey)) {
+      showToast('В колонке есть лиды — сначала перенеси их в другую колонку.', { type: 'error' });
+      return;
+    }
+    const customStages = (branchSettings?.customStages ?? []).filter((s) => s.key !== stageKey);
+    setDoc(branchSettingsRef, { customStages }, { merge: true }).catch(() =>
+      showToast('Не удалось удалить колонку.', { type: 'error' }),
     );
   };
 
@@ -175,15 +310,15 @@ export function LeadsPage() {
 
   const byColumn = useMemo(() => {
     const map = {};
-    for (const c of COLUMNS) map[c.key] = [];
-    for (const lead of leads) map[columnKeyOf(lead)].push(lead);
+    for (const c of resolvedColumns) map[c.key] = [];
+    for (const lead of leads) map[columnKeyOf(lead, resolvedColumns)].push(lead);
     // «Пробный назначен» — ближайший пробный первым, «Дозвон» — ближайший
     // дедлайн следующего звонка первым, а не по дате создания лида (порядок
     // остальных колонок), чтобы срочное было видно сразу.
     map.trial_scheduled.sort((a, b) => (a.trialDate?.seconds ?? Infinity) - (b.trialDate?.seconds ?? Infinity));
     map.calling.sort((a, b) => (a.nextCallDueAt?.seconds ?? Infinity) - (b.nextCallDueAt?.seconds ?? Infinity));
     return map;
-  }, [leads]);
+  }, [leads, resolvedColumns]);
 
   const leadsById = useMemo(() => new Map(leads.map((l) => [l.id, l])), [leads]);
 
@@ -262,7 +397,7 @@ export function LeadsPage() {
     const nextAttempts = [...attempts, { result, at: new Date(), expectedBy: lead.nextCallDueAt ?? null }];
 
     const stageFields = {};
-    if (columnKeyOf(lead) === 'new') {
+    if (columnKeyOf(lead, resolvedColumns) === 'new') {
       stageFields.funnelStage = 'calling';
       stageFields.stageHistory = [...(lead.stageHistory ?? []), { stage: 'calling', enteredAt: new Date() }];
     }
@@ -318,11 +453,11 @@ export function LeadsPage() {
   // moveLead), ни через исход успешного звонка (Запись/Отказ в
   // CallSuccessOutcomeModal). «Думает» не двигает стадию — не под гейтом.
   const checklistBlocksLeaving = (lead) =>
-    (columnKeyOf(lead) === 'new' || columnKeyOf(lead) === 'calling') && checklistPercent(lead.checklist) === 0;
+    (columnKeyOf(lead, resolvedColumns) === 'new' || columnKeyOf(lead, resolvedColumns) === 'calling') && checklistPercent(lead.checklist) === 0;
 
   const moveLead = (lead, stageKey) => {
-    if (columnKeyOf(lead) === stageKey) return;
-    if (!isForwardAllowed(columnKeyOf(lead), stageKey)) {
+    if (columnKeyOf(lead, resolvedColumns) === stageKey) return;
+    if (!isForwardAllowed(columnKeyOf(lead, resolvedColumns), stageKey)) {
       showToast('Нельзя вернуть лида на предыдущую стадию.', { type: 'error' });
       return;
     }
@@ -528,6 +663,7 @@ export function LeadsPage() {
             operatorByUid={operatorByUid}
             onAdd={column.key === 'new' ? openAddForm : undefined}
             onEditColumn={editStageColumn}
+            onDeleteColumn={deleteCustomStage}
             columns={resolvedColumns}
             onDropLead={(leadId, columnKey) => {
               const lead = leadsById.get(leadId);
@@ -536,6 +672,7 @@ export function LeadsPage() {
             {...cardActions}
           />
         ))}
+        <AddColumnButton onAdd={addCustomStage} disabled={(branchSettings?.customStages ?? []).length >= MAX_CUSTOM_STAGES} />
       </div>
 
       <StudentFormModal student={formLead} onClose={() => setFormLead(null)} onCreated={handleCreated} />

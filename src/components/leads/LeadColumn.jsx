@@ -67,23 +67,28 @@ function ColumnHint({ hint }) {
 
 /**
  * Название колонки — само служит триггером редактирования (двойной клик),
- * без отдельной иконки-карандаша. Попап правит `label`/`color` (ключ
- * стадии и порядок неизменны, см. `withStageOverrides` в columns.js).
- * Сохранение пишет в `settings/{branchId}.leadStageOverrides.{key}` через
- * `onEdit`.
- * @param {{label: string, color: string}} props.column
+ * без отдельной иконки-карандаша. Попап правит `label`/`color` (ключ и
+ * порядок 7 встроенных стадий неизменны, см. `withStageOverrides` в
+ * columns.js). Сохранение пишет в `settings/{branchId}.leadStageOverrides.{key}`
+ * (встроенные) или `.customStages` (пользовательские, `column.isCustom`)
+ * через `onEdit`. `onDelete` есть только у пользовательских колонок —
+ * встроенные 7 стадий удалить нельзя.
+ * @param {{label: string, color: string, isCustom?: boolean}} props.column
  * @param {(patch: {label: string, color: string}) => void} props.onEdit
+ * @param {() => void} [props.onDelete]
  */
-function EditableStageTitle({ column, onEdit }) {
+function EditableStageTitle({ column, onEdit, onDelete }) {
   const [open, setOpen] = useState(false);
   const [label, setLabel] = useState(column.label);
   const [color, setColor] = useState(column.color);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const ref = useRef(null);
 
   useEffect(() => {
     if (!open) return;
     setLabel(column.label);
     setColor(column.color);
+    setConfirmingDelete(false);
     const onClickOutside = (e) => {
       if (ref.current && !ref.current.contains(e.target)) setOpen(false);
     };
@@ -139,21 +144,44 @@ function EditableStageTitle({ column, onEdit }) {
               />
             ))}
           </div>
-          <div className="flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => setOpen(false)}
-              className="rounded-field px-2.5 py-1.5 text-[12px] text-muted hover:bg-surface-alt"
-            >
-              Отмена
-            </button>
-            <button
-              type="button"
-              onClick={save}
-              className="rounded-field bg-navy px-2.5 py-1.5 text-[12px] font-bold text-white hover:bg-navy-hover"
-            >
-              Сохранить
-            </button>
+          <div className="flex items-center justify-between gap-2">
+            {column.isCustom && onDelete ? (
+              confirmingDelete ? (
+                <button
+                  type="button"
+                  onClick={() => onDelete()}
+                  className="rounded-field px-2.5 py-1.5 text-[12px] font-bold text-danger hover:bg-danger/5"
+                >
+                  Точно удалить?
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setConfirmingDelete(true)}
+                  className="rounded-field px-2.5 py-1.5 text-[12px] text-danger hover:bg-danger/5"
+                >
+                  Удалить
+                </button>
+              )
+            ) : (
+              <span />
+            )}
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="rounded-field px-2.5 py-1.5 text-[12px] text-muted hover:bg-surface-alt"
+              >
+                Отмена
+              </button>
+              <button
+                type="button"
+                onClick={save}
+                className="rounded-field bg-navy px-2.5 py-1.5 text-[12px] font-bold text-white hover:bg-navy-hover"
+              >
+                Сохранить
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -395,8 +423,9 @@ function humanizeReasonKey(key) {
  * @param {() => void} props.onAdd
  * @param {(leadId: string, columnKey: string) => void} props.onDropLead
  * @param {(columnKey: string, patch: {label: string, color: string}) => void} props.onEditColumn
+ * @param {(columnKey: string) => void} [props.onDeleteColumn] только для пользовательских колонок (column.isCustom)
  */
-export function LeadColumn({ column, leads, operatorByUid, onAdd, onDropLead, onEditColumn, ...cardActions }) {
+export function LeadColumn({ column, leads, operatorByUid, onAdd, onDropLead, onEditColumn, onDeleteColumn, ...cardActions }) {
   const [dragOver, setDragOver] = useState(false);
   const isTrialScheduled = column.key === 'trial_scheduled';
   const isWon = column.key === 'won';
@@ -418,7 +447,11 @@ export function LeadColumn({ column, leads, operatorByUid, onAdd, onDropLead, on
         </span>
         <span className="min-w-0 justify-self-center">
           {onEditColumn ? (
-            <EditableStageTitle column={column} onEdit={(patch) => onEditColumn(column.key, patch)} />
+            <EditableStageTitle
+              column={column}
+              onEdit={(patch) => onEditColumn(column.key, patch)}
+              onDelete={onDeleteColumn ? () => onDeleteColumn(column.key) : undefined}
+            />
           ) : (
             <span className="truncate text-[15px] font-bold uppercase tracking-wide text-text">{column.label}</span>
           )}
