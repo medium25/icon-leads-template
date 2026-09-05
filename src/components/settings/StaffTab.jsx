@@ -11,7 +11,7 @@ import { Select } from '../ui/Select.jsx';
 import { Button } from '../ui/Button.jsx';
 import { phoneToAuthEmail } from '../../lib/auth.js';
 
-const ALL_ROLE_OPTIONS = [
+export const ALL_ROLE_OPTIONS = [
   { value: 'admin', label: 'Оператор' },
   { value: 'teacher', label: 'Учитель' },
   { value: 'manager', label: 'Менеджер' },

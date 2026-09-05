@@ -1,4 +1,5 @@
 import { StaffTab } from '../components/settings/StaffTab.jsx';
+import { StaffListTab } from '../components/settings/StaffListTab.jsx';
 import { LeadAssignmentTab } from '../components/settings/LeadAssignmentTab.jsx';
 
 /**
@@ -14,6 +15,7 @@ export function SettingsPage() {
         <StaffTab />
         <LeadAssignmentTab />
       </div>
+      <StaffListTab />
     </div>
   );
 }
