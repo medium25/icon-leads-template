@@ -31,7 +31,7 @@
 //                              без него assignedOperator остаётся пустым>
 //
 // 4. В редакторе выбрать функцию installTrigger → Выполнить (один раз,
-//    попросит доступ) — заведёт триггер по расписанию (каждые 10 минут).
+//    попросит доступ) — заведёт триггер по расписанию (каждую минуту).
 //    Без этого шага синк не будет запускаться сам.
 //
 // Проверить руками: выбрать функцию syncNewLeads → Выполнить, посмотреть
@@ -271,7 +271,7 @@ function base64Url_(str) {
   return Utilities.base64EncodeWebSafe(Utilities.newBlob(str).getBytes()).replace(/=+$/, '');
 }
 
-/** Запустить один раз вручную из редактора — заводит триггер каждые 10 минут (замену старого, если уже был). */
+/** Запустить один раз вручную из редактора — заводит триггер каждую минуту (замену старого, если уже был). */
 function installTrigger() {
   ScriptApp.getProjectTriggers()
     .filter(function (t) {
@@ -280,5 +280,5 @@ function installTrigger() {
     .forEach(function (t) {
       ScriptApp.deleteTrigger(t);
     });
-  ScriptApp.newTrigger('syncNewLeads').timeBased().everyMinutes(10).create();
+  ScriptApp.newTrigger('syncNewLeads').timeBased().everyMinutes(1).create();
 }
