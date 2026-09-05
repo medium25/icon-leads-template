@@ -10,7 +10,7 @@ import { DropdownMenu } from '../ui/DropdownMenu.jsx';
 import { COLUMNS, isForwardAllowed } from './columns.js';
 import { isPriorityLead, isTrialDay, contactDueDate, stageDeadline, overdueReasonLabel, LOST_REASON_OPTIONS } from '../../lib/leadFunnel.js';
 import { formatPhone, formatDateTime, formatDateTimeShort, formatRelativeDeadline, formatRelativeDay, formatOverdueBy, formatSource } from '../../lib/format.js';
-import { LEAD_CHECKLIST_ITEMS, checklistCheckedCount, checklistPercent } from '../../lib/leadChecklist.js';
+import { LEAD_CHECKLIST_ITEMS, CHECKLIST_RED_FLAGS, CHECKLIST_GREEN_FLAGS, checklistCheckedCount, checklistPercent } from '../../lib/leadChecklist.js';
 
 /**
  * Компактная лента комментариев лида, разворачивается прямо в карточке.
@@ -113,6 +113,22 @@ function LeadChecklistPanel({ leadId, checklist }) {
           {item.label}
         </label>
       ))}
+      <div className="mt-1 rounded-field bg-danger/5 p-1.5 text-[11px] text-danger">
+        <p className="font-bold">Red flag</p>
+        <ul className="list-disc space-y-0.5 pl-3.5">
+          {CHECKLIST_RED_FLAGS.map((flag, i) => (
+            <li key={i}>{flag}</li>
+          ))}
+        </ul>
+      </div>
+      <div className="rounded-field bg-success/10 p-1.5 text-[11px] text-success">
+        <p className="font-bold">Green flag</p>
+        <ul className="list-disc space-y-0.5 pl-3.5">
+          {CHECKLIST_GREEN_FLAGS.map((flag, i) => (
+            <li key={i}>{flag}</li>
+          ))}
+        </ul>
+      </div>
     </div>
   );
 }
@@ -593,12 +609,12 @@ export function LeadCard({
           именем/телефоном. */}
       {lead.vacancyName && <p className="-mt-1 truncate text-[12px] font-bold text-navy">{lead.vacancyName}</p>}
       {lead.formAnswers?.length > 0 && (
-        <div className="flex flex-col gap-1 border-b border-border pb-2" onClick={(e) => e.stopPropagation()}>
+        <div className="flex flex-col gap-2 border-b border-border pb-2 text-[12px]" onClick={(e) => e.stopPropagation()}>
           {lead.formAnswers.map((qa, i) => (
-            <p key={i} className="text-[12px] leading-snug">
-              <span className="text-muted">{qa.question}: </span>
-              <span className="text-text">{qa.answer}</span>
-            </p>
+            <div key={i} className="leading-snug">
+              <p className="text-[11px] text-muted">{qa.question}</p>
+              <p className="text-text">{qa.answer}</p>
+            </div>
           ))}
         </div>
       )}
