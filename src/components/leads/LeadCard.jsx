@@ -732,7 +732,8 @@ export function LeadCard({
             >
               <MessageSquare className="h-4 w-4" fill={hasComments ? 'currentColor' : 'none'} fillOpacity={hasComments ? 0.15 : 1} />
             </button>
-            {!isTerminal && (
+            {/* Заявки на вакансию не идут в группу — проверять там нечего. */}
+            {!isTerminal && lead.source !== 'vacancy_form' && (
               <button
                 type="button"
                 onClick={() => onOpenBooking(lead)}
