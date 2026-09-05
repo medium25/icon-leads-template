@@ -1,20 +1,35 @@
 // appsscript/VacancyLeadsSync.gs
 //
 // Синк заявок на вакансии из таблицы "ICON VACATIONS" (лист "CALL CENTRE")
-// в леды-борд — шлёт новые строки на functions/index.js (syncVacancyLead),
-// который заводит их лидами в students/доске «Заявки».
+// в леды-борд — пишет новые строки НАПРЯМУЮ в Firestore (students) через
+// REST API + сервис-аккаунт, без Cloud Functions/Blaze-плана.
 //
 // Это не деплоится этим репозиторием — Apps Script живёт в Google, файл
 // тут только как источник правды. Настройка:
 //
-// 1. В таблице "ICON VACATIONS": Расширения → Apps Script.
-// 2. Вставить содержимое этого файла (замените Code.gs целиком).
-// 3. Настройки проекта (⚙ слева) → Script Properties → Add script property:
-//      ENDPOINT_URL = https://<region>-<project>.cloudfunctions.net/syncVacancyLead
-//      SYNC_SECRET  = <тот же секрет, что задан через
-//                      `firebase functions:secrets:set VACANCY_SYNC_SECRET`>
+// 1. Завести сервис-аккаунт с доступом к Firestore (без Blaze — это
+//    обычный IAM, бесплатно):
+//      Google Cloud Console → IAM & Admin → Service Accounts → Create
+//      service account → любое имя → роль "Cloud Datastore User"
+//      (roles/datastore.user) → готово.
+//      Затем: этот аккаунт → Keys → Add key → Create new key → JSON —
+//      скачается файл, откройте его текстом, весь JSON целиком
+//      понадобится на шаге 3.
+//    Проект в Cloud Console — тот же, что Firebase-проект (icon-hr-crm),
+//    они делят один и тот же GCP-проект.
+//
+// 2. В таблице "ICON VACATIONS": Расширения → Apps Script → вставить
+//    содержимое этого файла (замените Code.gs целиком).
+//
+// 3. Настройки проекта (⚙ слева) → Script Properties → Add script property
+//    (три штуки):
+//      FIRESTORE_PROJECT_ID = icon-hr-crm
+//      SERVICE_ACCOUNT_JSON = <вставить весь JSON-файл ключа из шага 1
+//                              одной строкой как есть>
+//      DEFAULT_BRANCH_ID    = main   (или ваш реальный branchId филиала)
+//
 // 4. В редакторе выбрать функцию installTrigger_ → Выполнить (один раз,
-//    попросит доступ) — это заведёт триггер по расписанию (каждые 10 минут).
+//    попросит доступ) — заведёт триггер по расписанию (каждые 10 минут).
 //    Без этого шага синк не будет запускаться сам.
 //
 // Проверить руками: выбрать функцию syncNewLeads → Выполнить, посмотреть
@@ -33,9 +48,9 @@ var ANSWER_COL_END = 23; // W — остальное с P по W уходит в
 
 /**
  * Точка входа триггера — обрабатывает строки, добавленные с прошлого
- * запуска (PropertiesService.lastProcessedRow), шлёт их по одной на
- * syncVacancyLead и останавливается на первой ошибке (следующий запуск
- * повторит её и всё, что после — ничего не теряется).
+ * запуска (PropertiesService.lastProcessedRow), пишет их по одной
+ * напрямую в Firestore и останавливается на первой ошибке (следующий
+ * запуск повторит её и всё, что после — ничего не теряется).
  */
 function syncNewLeads() {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
@@ -55,12 +70,11 @@ function syncNewLeads() {
   var numRows = lastRow - startRow + 1;
   var data = sheet.getRange(startRow, 1, numRows, ANSWER_COL_END).getValues();
 
-  var endpoint = getEndpoint_();
-  var secret = getSecret_();
+  var accessToken = getAccessToken_();
   var processedThrough = startRow - 1;
 
   for (var i = 0; i < data.length; i++) {
-    var ok = sendRow_(data[i], headerRow, endpoint, secret);
+    var ok = sendRow_(data[i], headerRow, accessToken);
     if (!ok) break;
     processedThrough = startRow + i;
   }
@@ -68,10 +82,16 @@ function syncNewLeads() {
   props.setProperty('lastProcessedRow', String(processedThrough));
 }
 
-/** @returns {boolean} true — принято (200/201) или строка пустая/невалидная (пропущена намеренно), false — реальная ошибка, нужно повторить. */
-function sendRow_(row, headerRow, endpoint, secret) {
+/** @returns {boolean} true — записано, уже существовало, или строка невалидна/пустая (пропущена намеренно); false — реальная ошибка, нужно повторить. */
+function sendRow_(row, headerRow, accessToken) {
   var id = row[COL_ID - 1];
   if (!id) return true; // полностью пустая строка — пропускаем, не ошибка
+
+  var fullName = String(row[COL_NAME - 1] || '').trim();
+  var phone = normalizePhone_(row[COL_PHONE - 1]);
+  // Тестовая/пустая строка формы (Meta иногда кладёт такую в лист как
+  // образец) отсеивается тут же — без цифр в номере это не лид.
+  if (!fullName || phone.length < 9) return true;
 
   var answers = [];
   for (var c = ANSWER_COL_START; c <= ANSWER_COL_END; c++) {
@@ -80,31 +100,76 @@ function sendRow_(row, headerRow, endpoint, secret) {
     answers.push({ question: humanizeHeader_(headerRow[c - ANSWER_COL_START]), answer: String(answer) });
   }
 
-  var createdTime = row[COL_CREATED - 1];
-  var payload = {
-    externalId: String(id),
-    createdTime: createdTime instanceof Date ? createdTime.toISOString() : String(createdTime || ''),
-    vacancyName: String(row[COL_VACANCY - 1] || ''),
-    fullName: String(row[COL_NAME - 1] || ''),
-    phone: String(row[COL_PHONE - 1] || ''),
-    formAnswers: answers,
-  };
+  var createdTimeRaw = row[COL_CREATED - 1];
+  var createdAt = createdTimeRaw instanceof Date ? createdTimeRaw : new Date(createdTimeRaw);
+  if (isNaN(createdAt.getTime())) createdAt = new Date();
 
-  var response = UrlFetchApp.fetch(endpoint, {
-    method: 'post',
+  var props = PropertiesService.getScriptProperties();
+  var docId = 'vac_' + String(id).replace(/[^a-zA-Z0-9]/g, '');
+  var fields = toFirestoreFields_({
+    fullName: fullName,
+    phone: phone,
+    phone2: null,
+    branchId: props.getProperty('DEFAULT_BRANCH_ID') || 'main',
+    vacancyName: String(row[COL_VACANCY - 1] || ''),
+    formAnswers: answers,
+    source: 'vacancy_form',
+    status: 'lead',
+    statusReason: null,
+    funnelStage: 'new',
+    // Ответственного не назначаем автоматически — берут вручную через
+    // карточку либо через Настройки → «Назначение ответственных».
+    assignedOperator: null,
+    stageHistory: [{ stage: 'new', enteredAt: createdAt }],
+    balance: 0,
+    balanceUpdatedAt: new Date(),
+    note: '',
+    isFlagged: false,
+    activeGroupsCount: 0,
+    firstPaymentAt: null,
+    lastPaymentAt: null,
+    trialAt: null,
+    leftAt: null,
+    createdAt: createdAt,
+    createdBy: 'vacancy_sync',
+    isArchived: false,
+  });
+
+  var projectId = props.getProperty('FIRESTORE_PROJECT_ID');
+  if (!projectId) throw new Error('Script Properties: задай FIRESTORE_PROJECT_ID (см. инструкцию в шапке файла).');
+
+  // currentDocument.exists=false — Firestore сам откажет (409), если
+  // документ с таким id уже есть: повторная доставка той же строки (retry,
+  // перезапуск скрипта) не создаст дубль и не перезапишет уже продвинутый
+  // по воронке лид.
+  var url =
+    'https://firestore.googleapis.com/v1/projects/' +
+    projectId +
+    '/databases/(default)/documents/students/' +
+    docId +
+    '?currentDocument.exists=false';
+
+  var response = UrlFetchApp.fetch(url, {
+    method: 'patch',
     contentType: 'application/json',
-    headers: { 'x-sync-secret': secret },
-    payload: JSON.stringify(payload),
+    headers: { Authorization: 'Bearer ' + accessToken },
+    payload: JSON.stringify({ fields: fields }),
     muteHttpExceptions: true,
   });
 
   var code = response.getResponseCode();
-  // 400 — невалидная строка (нет телефона и т.п., см. functions/index.js) —
-  // такую не имеет смысла повторять, считаем «обработанной».
-  if (code === 200 || code === 201 || code === 400) return true;
+  if (code === 200 || code === 409) return true; // создано, либо уже было — оба ок
 
-  Logger.log('syncVacancyLead: ошибка для id=' + id + ' — ' + code + ' ' + response.getContentText());
+  Logger.log('Firestore write failed for id=' + id + ': ' + code + ' ' + response.getContentText());
   return false;
+}
+
+// Номера в форме приходят вперемешку: с "+998", без кода страны (9 цифр),
+// с пробелами/дефисами — приводим к единому формату "998" + 9 цифр, как
+// везде в приложении (см. src/lib/auth.js, src/pages/LoginPage.jsx).
+function normalizePhone_(raw) {
+  var digits = String(raw || '').replace(/\D/g, '');
+  return digits.length === 9 ? '998' + digits : digits;
 }
 
 /** "qaysi_ish_grafikimiz_sizga_mos?_" → "Qaysi ish grafikimiz sizga mos?" */
@@ -116,16 +181,69 @@ function humanizeHeader_(header) {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-function getEndpoint_() {
-  var url = PropertiesService.getScriptProperties().getProperty('ENDPOINT_URL');
-  if (!url) throw new Error('Script Properties: задай ENDPOINT_URL (см. инструкцию в шапке файла).');
-  return url;
+// --- Firestore REST value encoding ---------------------------------------
+
+function toFirestoreValue_(value) {
+  if (value === null || value === undefined) return { nullValue: null };
+  if (typeof value === 'boolean') return { booleanValue: value };
+  if (typeof value === 'number') {
+    return value % 1 === 0 ? { integerValue: String(value) } : { doubleValue: value };
+  }
+  if (value instanceof Date) return { timestampValue: value.toISOString() };
+  if (Array.isArray(value)) return { arrayValue: { values: value.map(toFirestoreValue_) } };
+  if (typeof value === 'object') return { mapValue: { fields: toFirestoreFields_(value) } };
+  return { stringValue: String(value) };
 }
 
-function getSecret_() {
-  var secret = PropertiesService.getScriptProperties().getProperty('SYNC_SECRET');
-  if (!secret) throw new Error('Script Properties: задай SYNC_SECRET (см. инструкцию в шапке файла).');
-  return secret;
+function toFirestoreFields_(obj) {
+  var fields = {};
+  Object.keys(obj).forEach(function (key) {
+    fields[key] = toFirestoreValue_(obj[key]);
+  });
+  return fields;
+}
+
+// --- Сервис-аккаунт: подписываем JWT и меняем на access token -----------
+// Без внешних библиотек — Utilities.computeRsaSha256Signature встроен в
+// Apps Script специально для этого сценария (service account без OAuth2
+// consent-экрана, т.к. это server-to-server, не от имени пользователя).
+
+function getAccessToken_() {
+  var saJson = PropertiesService.getScriptProperties().getProperty('SERVICE_ACCOUNT_JSON');
+  if (!saJson) throw new Error('Script Properties: задай SERVICE_ACCOUNT_JSON (см. инструкцию в шапке файла).');
+  var sa = JSON.parse(saJson);
+
+  var now = Math.floor(Date.now() / 1000);
+  var header = base64Url_(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
+  var claimSet = base64Url_(
+    JSON.stringify({
+      iss: sa.client_email,
+      scope: 'https://www.googleapis.com/auth/datastore',
+      aud: 'https://oauth2.googleapis.com/token',
+      iat: now,
+      exp: now + 3600,
+    }),
+  );
+  var signatureInput = header + '.' + claimSet;
+  var signatureBytes = Utilities.computeRsaSha256Signature(signatureInput, sa.private_key);
+  var jwt = signatureInput + '.' + Utilities.base64EncodeWebSafe(signatureBytes).replace(/=+$/, '');
+
+  var response = UrlFetchApp.fetch('https://oauth2.googleapis.com/token', {
+    method: 'post',
+    payload: {
+      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+      assertion: jwt,
+    },
+    muteHttpExceptions: true,
+  });
+
+  var body = JSON.parse(response.getContentText());
+  if (!body.access_token) throw new Error('Не удалось получить access_token: ' + response.getContentText());
+  return body.access_token;
+}
+
+function base64Url_(str) {
+  return Utilities.base64EncodeWebSafe(Utilities.newBlob(str).getBytes()).replace(/=+$/, '');
 }
 
 /** Запустить один раз вручную из редактора — заводит триггер каждые 10 минут (замену старого, если уже был). */
