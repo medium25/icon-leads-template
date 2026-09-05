@@ -521,6 +521,11 @@ export function LeadCard({
     // «Пришёл» перенесён на отдельную страницу «Пробные» (там же создаётся
     // сам студент, см. TrialLeadCard) — тут остаётся только «Не пришёл».
     ...(stage === 'trial_scheduled' ? [{ label: 'Не пришёл', onClick: () => onRescheduleTrial(lead) }] : []),
+    // Перенос карточки в эти стадии (drag/«→») сам по себе ничего не
+    // спрашивает — дату пробного и причину отказа можно (необязательно)
+    // дозаполнить вот отсюда, если оператор сам захочет.
+    ...(stage === 'trial_scheduled' && !lead.trialDate ? [{ label: 'Указать дату пробного', onClick: () => onScheduleTrial(lead) }] : []),
+    ...(stage === 'lost' && !lead.lostReason ? [{ label: 'Указать причину отказа', onClick: () => onDecline(lead) }] : []),
     { label: 'Редактировать', onClick: () => onEdit(lead) },
     // Пункт виден на любой нетерминальной стадии — реально удаляет только
     // status=='lead' (правило Firestore), для остальных DeleteLeadModal
@@ -539,14 +544,7 @@ export function LeadCard({
   ).map((c) => ({
     label: c.label,
     danger: c.key === 'lost',
-    // «Пробный назначен» требует дату/время/учителя, «Отказ» — причину из
-    // фиксированного списка — открываем те же формы, что и «⋮», вместо
-    // голого onMove.
-    onClick: () => {
-      if (c.key === 'trial_scheduled') return onScheduleTrial(lead);
-      if (c.key === 'lost') return onDecline(lead);
-      return onMove(lead, c.key);
-    },
+    onClick: () => onMove(lead, c.key),
   }));
 
   return (
