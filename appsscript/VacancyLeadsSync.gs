@@ -30,7 +30,7 @@
 //                              которому назначать новые лиды — необязательно,
 //                              без него assignedOperator остаётся пустым>
 //
-// 4. В редакторе выбрать функцию installTrigger_ → Выполнить (один раз,
+// 4. В редакторе выбрать функцию installTrigger → Выполнить (один раз,
 //    попросит доступ) — заведёт триггер по расписанию (каждые 10 минут).
 //    Без этого шага синк не будет запускаться сам.
 //
@@ -272,7 +272,7 @@ function base64Url_(str) {
 }
 
 /** Запустить один раз вручную из редактора — заводит триггер каждые 10 минут (замену старого, если уже был). */
-function installTrigger_() {
+function installTrigger() {
   ScriptApp.getProjectTriggers()
     .filter(function (t) {
       return t.getHandlerFunction() === 'syncNewLeads';
