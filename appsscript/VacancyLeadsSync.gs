@@ -21,12 +21,14 @@
 // 2. В таблице "ICON VACATIONS": Расширения → Apps Script → вставить
 //    содержимое этого файла (замените Code.gs целиком).
 //
-// 3. Настройки проекта (⚙ слева) → Script Properties → Add script property
-//    (три штуки):
+// 3. Настройки проекта (⚙ слева) → Script Properties → Add script property:
 //      FIRESTORE_PROJECT_ID = icon-hr-crm
 //      SERVICE_ACCOUNT_JSON = <вставить весь JSON-файл ключа из шага 1
 //                              одной строкой как есть>
 //      DEFAULT_BRANCH_ID    = main   (или ваш реальный branchId филиала)
+//      DEFAULT_OPERATOR_UID = <uid оператора в Firestore (staff/{uid}),
+//                              которому назначать новые лиды — необязательно,
+//                              без него assignedOperator остаётся пустым>
 //
 // 4. В редакторе выбрать функцию installTrigger_ → Выполнить (один раз,
 //    попросит доступ) — заведёт триггер по расписанию (каждые 10 минут).
@@ -137,9 +139,12 @@ function sendRow_(row, headerRow, accessToken) {
     status: 'lead',
     statusReason: null,
     funnelStage: 'new',
-    // Ответственного не назначаем автоматически — берут вручную через
-    // карточку либо через Настройки → «Назначение ответственных».
-    assignedOperator: null,
+    // DEFAULT_OPERATOR_UID (Script Properties) — если задан, новые лиды
+    // сразу назначаются на этого оператора (пока он единственный, вручную
+    // разбирать нечего); не задан — assignedOperator остаётся null,
+    // берут вручную через карточку или Настройки → «Назначение
+    // ответственных».
+    assignedOperator: props.getProperty('DEFAULT_OPERATOR_UID') || null,
     stageHistory: [{ stage: 'new', enteredAt: createdAt }],
     balance: 0,
     balanceUpdatedAt: new Date(),
