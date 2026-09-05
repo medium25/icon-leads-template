@@ -45,12 +45,17 @@ var COL_NAME = 14; // N — ismingiz:_
 var COL_PHONE = 15; // O — raqamingiz:_
 var ANSWER_COL_START = 16; // P
 var ANSWER_COL_END = 23; // W — остальное с P по W уходит вопрос/ответ парами
+// Столбец X — сюда скрипт пишет "synced"/"error" после попытки отправки,
+// чтобы не слать одну и ту же строку повторно. Новую строку в столбец
+// вписывать вручную не нужно — заполнится само при первом запуске.
+var SYNC_MARKER_COL = 24;
 
 /**
- * Точка входа триггера — обрабатывает строки, добавленные с прошлого
- * запуска (PropertiesService.lastProcessedRow), пишет их по одной
- * напрямую в Firestore и останавливается на первой ошибке (следующий
- * запуск повторит её и всё, что после — ничего не теряется).
+ * Точка входа триггера. Новые лиды в этой таблице вставляются НАВЕРХ (это
+ * приводит к тому, что даже строка заголовков со временем съезжает вниз),
+ * поэтому отслеживать «последнюю обработанную строку» по номеру нельзя —
+ * вместо этого каждый раз ищем строку заголовков заново и обрабатываем
+ * все строки листа, у которых столбец SYNC_MARKER_COL ещё пуст.
  */
 function syncNewLeads() {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
@@ -59,27 +64,39 @@ function syncNewLeads() {
   var lastRow = sheet.getLastRow();
   if (lastRow < 2) return;
 
-  var props = PropertiesService.getScriptProperties();
-  var startRow = Number(props.getProperty('lastProcessedRow') || 1) + 1;
-  if (startRow > lastRow) return; // новых строк нет
-
+  var headerRowIndex = findHeaderRow_(sheet, lastRow);
   var headerRow = sheet
-    .getRange(1, ANSWER_COL_START, 1, ANSWER_COL_END - ANSWER_COL_START + 1)
+    .getRange(headerRowIndex, ANSWER_COL_START, 1, ANSWER_COL_END - ANSWER_COL_START + 1)
     .getValues()[0];
 
-  var numRows = lastRow - startRow + 1;
-  var data = sheet.getRange(startRow, 1, numRows, ANSWER_COL_END).getValues();
+  var allData = sheet.getRange(1, 1, lastRow, ANSWER_COL_END).getValues();
+  var markers = sheet.getRange(1, SYNC_MARKER_COL, lastRow, 1).getValues().map(function (m) {
+    return m[0];
+  });
 
-  var accessToken = getAccessToken_();
-  var processedThrough = startRow - 1;
+  var accessToken = null; // получаем лениво — незачем ходить за токеном, если слать нечего
 
-  for (var i = 0; i < data.length; i++) {
-    var ok = sendRow_(data[i], headerRow, accessToken);
-    if (!ok) break;
-    processedThrough = startRow + i;
+  for (var i = 0; i < allData.length; i++) {
+    var rowNumber = i + 1;
+    if (rowNumber === headerRowIndex) continue;
+    if (markers[i] === 'synced') continue; // уже отправлена раньше
+
+    if (!accessToken) accessToken = getAccessToken_();
+    markers[i] = sendRow_(allData[i], headerRow, accessToken) ? 'synced' : 'error';
   }
 
-  props.setProperty('lastProcessedRow', String(processedThrough));
+  sheet.getRange(1, SYNC_MARKER_COL, lastRow, 1).setValues(markers.map(function (v) {
+    return [v];
+  }));
+}
+
+/** Строка заголовков — та, где в столбце A буквально "id" (см. комментарий у syncNewLeads, её позиция плавает). */
+function findHeaderRow_(sheet, lastRow) {
+  var colA = sheet.getRange(1, COL_ID, lastRow, 1).getValues();
+  for (var i = 0; i < colA.length; i++) {
+    if (colA[i][0] === 'id') return i + 1;
+  }
+  throw new Error('Не нашёл строку заголовков (столбец A со значением "id").');
 }
 
 /** @returns {boolean} true — записано, уже существовало, или строка невалидна/пустая (пропущена намеренно); false — реальная ошибка, нужно повторить. */
