@@ -6,6 +6,7 @@ import { ProtectedRoute } from './components/ProtectedRoute.jsx';
 import { AppShell } from './components/layout/AppShell.jsx';
 import { LoginPage } from './pages/LoginPage.jsx';
 import { LeadsPage } from './pages/LeadsPage.jsx';
+import { SettingsPage } from './pages/SettingsPage.jsx';
 
 /**
  * Шаблон «доска лидов» — одна страница (LeadsPage) под защитой авторизации.
@@ -30,6 +31,14 @@ function App() {
               >
                 <Route index element={<Navigate to="/leads" replace />} />
                 <Route path="leads" element={<LeadsPage />} />
+                <Route
+                  path="settings"
+                  element={
+                    <ProtectedRoute allow={['ceo', 'manager', 'admin']}>
+                      <SettingsPage />
+                    </ProtectedRoute>
+                  }
+                />
               </Route>
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>

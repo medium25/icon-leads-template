@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { NavLink } from 'react-router-dom';
-import { Inbox, ChevronsLeft, ChevronsRight, X } from 'lucide-react';
+import { Inbox, Settings, ChevronsLeft, ChevronsRight, X } from 'lucide-react';
+import { useRole } from '../../hooks/useRole.js';
 
 const STORAGE_KEY = 'leads-board:sidebar-collapsed';
 
@@ -14,6 +15,7 @@ const STORAGE_KEY = 'leads-board:sidebar-collapsed';
  * @param {() => void} [props.onMobileClose]
  */
 export function Sidebar({ mobileOpen = false, onMobileClose }) {
+  const { isAdmin } = useRole();
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(STORAGE_KEY) === '1');
 
   const toggle = () => {
@@ -50,6 +52,20 @@ export function Sidebar({ mobileOpen = false, onMobileClose }) {
           <Inbox className="h-5 w-5 shrink-0" />
           {!collapsed && <span className="truncate">Заявки</span>}
         </NavLink>
+
+        {isAdmin && (
+          <NavLink
+            to="/settings"
+            className={({ isActive }) =>
+              `flex items-center gap-3 rounded-field px-3 py-2.5 text-[14px] font-bold ${
+                isActive ? 'bg-navy/10 text-navy' : 'text-muted hover:bg-surface-alt hover:text-text'
+              }`
+            }
+          >
+            <Settings className="h-5 w-5 shrink-0" />
+            {!collapsed && <span className="truncate">Настройки</span>}
+          </NavLink>
+        )}
       </nav>
 
       <button
