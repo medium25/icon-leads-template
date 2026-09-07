@@ -10,7 +10,7 @@ import { DropdownMenu } from '../ui/DropdownMenu.jsx';
 import { COLUMNS, isForwardAllowed, resolveAttemptSlots } from './columns.js';
 import { isPriorityLead, isTrialDay, contactDueDate, stageDeadline, overdueReasonLabel, LOST_REASON_OPTIONS } from '../../lib/leadFunnel.js';
 import { formatPhone, formatDateTime, formatDateTimeShort, formatRelativeDeadline, formatRelativeDay, formatOverdueBy, formatSource } from '../../lib/format.js';
-import { LEAD_CHECKLIST_ITEMS, checklistCheckedCount, checklistPercent } from '../../lib/leadChecklist.js';
+import { LEAD_CHECKLIST_ITEMS, CHECKLIST_RED_FLAGS, CHECKLIST_GREEN_FLAGS, checklistCheckedCount, checklistPercent } from '../../lib/leadChecklist.js';
 
 /**
  * Компактная лента комментариев лида, разворачивается прямо в карточке.
@@ -89,10 +89,11 @@ export function LeadCommentsPanel({ leadId }) {
 }
 
 /**
- * Чек-лист первого разговора — раскрывается прямо в карточке, только в
- * «Новый лид»/«Дозвон» (см. LEAD_CHECKLIST_ITEMS). Пишет сразу в Firestore
- * по каждому клику — тот же самооптимистичный паттерн, что и остальные
- * действия на карточке (onMarkAttempt и т.п.), без промежуточного стейта.
+ * Чек-лист проверки кандидата — раскрывается прямо в карточке, только в
+ * «ФИЛЬТР»/«ИНТЕРВЬЮ ПО ТЕЛЕФОНУ» (`new`/`calling`, см. LEAD_CHECKLIST_ITEMS).
+ * Пишет сразу в Firestore по каждому клику — тот же самооптимистичный
+ * паттерн, что и остальные действия на карточке, без промежуточного стейта.
+ * Под чек-листом — справочные списки Red/Green flag (без отметок).
  */
 function LeadChecklistPanel({ leadId, checklist }) {
   const checked = checklistCheckedCount(checklist);
@@ -113,6 +114,22 @@ function LeadChecklistPanel({ leadId, checklist }) {
           {item.label}
         </label>
       ))}
+      <div className="mt-1 rounded-field bg-danger/5 p-1.5 text-[11px] text-danger">
+        <p className="font-bold">Red flag</p>
+        <ul className="list-disc space-y-0.5 pl-3.5">
+          {CHECKLIST_RED_FLAGS.map((flag, i) => (
+            <li key={i}>{flag}</li>
+          ))}
+        </ul>
+      </div>
+      <div className="rounded-field bg-success/10 p-1.5 text-[11px] text-success">
+        <p className="font-bold">Green flag</p>
+        <ul className="list-disc space-y-0.5 pl-3.5">
+          {CHECKLIST_GREEN_FLAGS.map((flag, i) => (
+            <li key={i}>{flag}</li>
+          ))}
+        </ul>
+      </div>
     </div>
   );
 }
