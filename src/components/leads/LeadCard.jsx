@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { collection, addDoc, doc, updateDoc, increment, query, where, orderBy, serverTimestamp } from 'firebase/firestore';
-import { CheckCircle2, XCircle, Circle, Snowflake, ArrowRight, PhoneOff, MessageSquare, ListChecks, Clock, Users, X, Send } from 'lucide-react';
+import { CheckCircle2, XCircle, Circle, Snowflake, ArrowRight, PhoneOff, MessageSquare, ListChecks, Clock, Users, X } from 'lucide-react';
 import { db } from '../../firebase.js';
 import { useAuth } from '../../hooks/useAuth.js';
 import { useCollection } from '../../hooks/useCollection.js';
@@ -577,8 +577,8 @@ export function LeadCard({
         </div>
       </div>
 
-      <div className="-mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[14px] font-semibold" onClick={(e) => e.stopPropagation()}>
-        <a href={`tel:+${lead.phone}`} className="text-link">
+      <div className="-mt-1 flex items-center justify-between gap-2 text-[14px] font-semibold" onClick={(e) => e.stopPropagation()}>
+        <a href={`tel:+${lead.phone}`} className="shrink-0 text-link">
           {formatPhone(lead.phone)}
         </a>
         {telegramHandle && (
@@ -586,9 +586,9 @@ export function LeadCard({
             href={`https://t.me/${telegramHandle}`}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex items-center gap-1 text-link"
+            className="min-w-0 truncate text-right text-link"
           >
-            <Send className="h-3.5 w-3.5" />@{telegramHandle}
+            @{telegramHandle}
           </a>
         )}
       </div>
