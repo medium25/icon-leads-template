@@ -577,7 +577,7 @@ export function LeadCard({
         </div>
       </div>
 
-      <div className="-mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[12px]" onClick={(e) => e.stopPropagation()}>
+      <div className="-mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[14px] font-semibold" onClick={(e) => e.stopPropagation()}>
         <a href={`tel:+${lead.phone}`} className="text-link">
           {formatPhone(lead.phone)}
         </a>
@@ -586,9 +586,9 @@ export function LeadCard({
             href={`https://t.me/${telegramHandle}`}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex items-center gap-0.5 text-link"
+            className="inline-flex items-center gap-1 text-link"
           >
-            <Send className="h-3 w-3" />@{telegramHandle}
+            <Send className="h-3.5 w-3.5" />@{telegramHandle}
           </a>
         )}
       </div>
