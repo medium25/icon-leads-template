@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { collection, addDoc, doc, updateDoc, increment, query, where, orderBy, serverTimestamp } from 'firebase/firestore';
-import { CheckCircle2, XCircle, Circle, Snowflake, ArrowRight, PhoneOff, Info, MessageSquare, ListChecks, Clock, Users, X } from 'lucide-react';
+import { CheckCircle2, XCircle, Circle, Snowflake, ArrowRight, PhoneOff, MessageSquare, ListChecks, Clock, Users, X } from 'lucide-react';
 import { db } from '../../firebase.js';
 import { useAuth } from '../../hooks/useAuth.js';
 import { useCollection } from '../../hooks/useCollection.js';
@@ -287,55 +287,6 @@ function OverdueBadge({ reason, deadline, overdueBy }) {
 }
 
 /**
- * Иконка «i» — доп. информация о лиде: ответы на вопросы формы
- * (`lead.formAnswers`, `vacancyName` и т.п.), скрытая с карточки по
- * умолчанию, чтобы не загромождать компактный вид. Рендерится только если
- * есть что показывать; длинный список скроллится внутри попапа.
- * @param {Array<{question: string, answer: string}>} items
- */
-function LeadInfoPopover({ items }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onClickOutside = (e) => {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
-    };
-    document.addEventListener('mousedown', onClickOutside);
-    return () => document.removeEventListener('mousedown', onClickOutside);
-  }, [open]);
-
-  // Позиционируется НЕ относительно себя/иконки (та почти всегда не по
-  // центру карточки — из-за этого попап вылезал за левый край), а
-  // относительно всей карточки (см. `relative` на корневом div карточки
-  // ниже) — inset-x повторяет её собственный внутренний отступ p-2.5,
-  // поэтому попап всегда ровно по ширине карточки, не шире и не уже.
-  return (
-    <div ref={ref} onClick={(e) => e.stopPropagation()}>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-label="Доп. информация"
-        className="flex h-3.5 w-3.5 items-center justify-center text-muted hover:text-navy"
-      >
-        <Info className="h-3.5 w-3.5" />
-      </button>
-      {open && (
-        <div className="absolute inset-x-2.5 top-7 z-20 flex max-h-[60vh] flex-col gap-2 overflow-y-auto rounded-field border border-border bg-surface p-3 shadow-hover">
-          {items.map((item, i) => (
-            <div key={i}>
-              <p className="text-[11px] leading-snug text-muted">{item.question}</p>
-              <p className="mt-0.5 text-[13px] font-bold leading-snug text-text">{item.answer}</p>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/**
  * «Не выходит на связь» — необязательный трекер, общий для «Пробный
  * назначен» и «Дожим» (тот же сценарий на обеих стадиях). Кнопка-
  * переключатель; открывшись, показывает до 3 попыток связаться. Каждая
@@ -497,7 +448,8 @@ export function LeadCard({
 
   // Ответы на вопросы формы (appsscript/VacancyLeadsSync.gs пишет
   // `formAnswers: [{question, answer}]`; SheetsSync.gs с прошлых таблиц —
-  // отдельные поля russianLevel/…). В попап «i» попадают только заполненные.
+  // отдельные поля russianLevel/…). Показываются прямо на карточке
+  // прокручиваемым блоком; в список попадают только заполненные.
   const infoItems = [
     lead.vacancyName && { question: 'Вакансия', answer: lead.vacancyName },
     ...(Array.isArray(lead.formAnswers) ? lead.formAnswers.filter((a) => a && a.answer) : []),
@@ -586,7 +538,6 @@ export function LeadCard({
         </div>
         <div className="flex shrink-0 items-center gap-1">
           {trialConfirmAtRisk && <PhoneOff className="h-3.5 w-3.5 text-orange" aria-label="Не берёт трубку — подтверждение пробного" />}
-          {infoItems.length > 0 && <LeadInfoPopover items={infoItems} />}
           <a href={`tel:+${lead.phone}`} onClick={(e) => e.stopPropagation()} className="truncate text-[12px] text-link">
             {formatPhone(lead.phone)}
           </a>
@@ -601,6 +552,20 @@ export function LeadCard({
             nextCallDueAt={lead.nextCallDueAt}
             slots={attemptSlots}
           />
+        </div>
+      )}
+
+      {infoItems.length > 0 && (
+        <div
+          className="max-h-[136px] space-y-1.5 overflow-y-auto rounded-field bg-surface-alt px-2 py-1.5"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {infoItems.map((item, i) => (
+            <div key={i}>
+              <p className="text-[10px] leading-snug text-muted">{item.question}</p>
+              <p className="whitespace-pre-line text-[12px] font-semibold leading-snug text-text">{item.answer}</p>
+            </div>
+          ))}
         </div>
       )}
 
