@@ -163,6 +163,47 @@ function form_normalizePhone_(raw) {
   return digits.length === 9 ? '998' + digits : digits;
 }
 
+/**
+ * Разовый прогон всех строк листа ответов формы — для заявок, пришедших ДО
+ * установки триггера (onFormSubmit ловит только новые). Дубли не создаёт
+ * (docId = form_<номер строки>, currentDocument.exists=false). Запускать
+ * вручную из редактора. FORM_SHEET_NAME — имя листа с ответами (см. ниже),
+ * поправь, если у тебя оно другое.
+ */
+var FORM_SHEET_NAME = 'Form_Responses2';
+
+function form_backfillAll() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(FORM_SHEET_NAME);
+  if (!sheet) {
+    Logger.log('Лист «' + FORM_SHEET_NAME + '» не найден. Поправь FORM_SHEET_NAME в начале файла.');
+    return;
+  }
+  var data = sheet.getDataRange().getValues();
+  if (data.length < 2) {
+    Logger.log('В листе нет строк с данными.');
+    return;
+  }
+  var headers = data[0];
+  var ok = 0;
+  var skipped = 0;
+  for (var r = 1; r < data.length; r++) {
+    var namedValues = {};
+    for (var c = 0; c < headers.length; c++) {
+      var v = data[r][c];
+      namedValues[String(headers[c])] = [v === null || v === undefined ? '' : String(v)];
+    }
+    var fakeEvent = { namedValues: namedValues, range: { getRow: function () { return r + 1; }, getSheet: function () { return sheet; } } };
+    try {
+      form_onSubmit(fakeEvent);
+      ok++;
+    } catch (err) {
+      skipped++;
+      Logger.log('Строка ' + (r + 1) + ': ' + (err.message || err));
+    }
+  }
+  Logger.log('Backfill готово: обработано ' + ok + ', пропущено/ошибка ' + skipped + ' из ' + (data.length - 1) + '.');
+}
+
 /** Запустить один раз вручную — ставит триггер «при отправке формы» (заменяет старый с тем же именем). */
 function form_installTrigger() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
