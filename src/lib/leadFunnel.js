@@ -77,18 +77,18 @@ function endOfDayIn(daysAhead) {
 }
 
 /**
- * Дедлайн следующей попытки дозвона — сетка 2 сегодня/2 завтра/1
- * послезавтра (конец рабочего дня). Пишется на документ лида при каждой отметке
- * попытки (`markAttempt`), чтобы карточка не «зависала» в «Дозвоне»
- * незамеченной. `null` — попыток не осталось (5 уже сделано).
+ * Дедлайн следующей попытки дозвона — сетка «2 попытки в день» (конец
+ * рабочего дня): попытки 0–1 сегодня, 2–3 завтра, 4–5 послезавтра и т.д.
+ * Пишется на документ лида при каждой отметке попытки (`markAttempt`),
+ * чтобы карточка не «зависала» в «Дозвоне» незамеченной.
  * @param {Array<{result: 'success'|'fail'}>} attempts
- * @returns {Date|null}
+ * @param {number} [slots=5] сколько всего попыток на этой стадии (настройка колонки)
+ * @returns {Date|null} `null` — попыток не осталось
  */
-export function nextCallDueAt(attempts) {
+export function nextCallDueAt(attempts, slots = 5) {
   const n = attempts.length;
-  if (n === 0 || n >= 5) return null;
-  const daysAhead = n < 2 ? 0 : n < 4 ? 1 : 2;
-  return endOfDayIn(daysAhead);
+  if (n === 0 || n >= slots) return null;
+  return endOfDayIn(Math.floor(n / 2));
 }
 
 /**
@@ -308,10 +308,9 @@ export function isOperatorWorkingAt(workSchedule, date) {
 const MIN_GAP_BETWEEN_CALLS_MS = 60 * 60 * 1000;
 
 /**
- * Проверка дедлайна дозвона — сетка 2 звонка сегодня/2 завтра/1 послезавтра
- * (см. nextCallDueAt), внутри пары день делится на «первый» и «второй»
- * звонок (индекс попытки, для которой ставим этот дедлайн, — 0/2 первый в
- * паре, 1/3 второй, 4 — одиночный послезавтра). Правила:
+ * Проверка дедлайна дозвона — сетка «2 звонка в день» (см. nextCallDueAt),
+ * внутри пары день делится на «первый» (чётный индекс попытки) и «второй»
+ * (нечётный). Правила:
  * — дедлайн должен попадать в рабочее время оператора;
  * — первому в паре нельзя вплотную к концу рабочего дня — не успеет
  *   сделать второй звонок (мин. час до конца дня);
@@ -329,7 +328,7 @@ export function validateCallDeadline(candidate, attempts, workSchedule) {
   }
 
   const index = attempts.length;
-  if (index === 0 || index === 2) {
+  if (index % 2 === 0) {
     const daySchedule = workSchedule?.[candidate.getDay()];
     const endOfDay = new Date(candidate);
     if (daySchedule) {
@@ -343,7 +342,7 @@ export function validateCallDeadline(candidate, attempts, workSchedule) {
     }
   }
 
-  if (index === 1 || index === 3) {
+  if (index % 2 === 1) {
     const prevAt = attempts[attempts.length - 1]?.at;
     const prevDate = prevAt?.toDate ? prevAt.toDate() : prevAt;
     if (prevDate && candidate.getTime() - prevDate.getTime() < MIN_GAP_BETWEEN_CALLS_MS) {

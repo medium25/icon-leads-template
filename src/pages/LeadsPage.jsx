@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Moon, Sun } from 'lucide-react';
-import { collection, doc, query, where, orderBy, onSnapshot, updateDoc, setDoc, writeBatch, serverTimestamp, increment } from 'firebase/firestore';
+import { collection, doc, query, where, orderBy, onSnapshot, updateDoc, setDoc, writeBatch, serverTimestamp, increment, deleteField } from 'firebase/firestore';
 import { db } from '../firebase.js';
 import { useBranch } from '../hooks/useBranch.js';
 import { useCollection } from '../hooks/useCollection.js';
@@ -20,7 +20,18 @@ import { CallSuccessOutcomeModal } from '../components/leads/CallSuccessOutcomeM
 import { GroupBookingModal } from '../components/leads/GroupBookingModal.jsx';
 import { LeadColumn } from '../components/leads/LeadColumn.jsx';
 import { DropdownMenu } from '../components/ui/DropdownMenu.jsx';
-import { COLUMNS, columnKeyOf, isForwardAllowed, withStageOverrides } from '../components/leads/columns.js';
+import {
+  columnKeyOf,
+  isForwardAllowed,
+  resolveColumns,
+  reorderStageKeys,
+  resolveAttemptSlots,
+  customColumns,
+  makeCustomStageKey,
+  BUILTIN_STAGE_KEYS,
+  MAX_STAGES,
+  PINNED_FIRST_STAGE,
+} from '../components/leads/columns.js';
 import { checklistPercent } from '../lib/leadChecklist.js';
 import { advanceStage, nextCallDueAt, firstTouchDueAt, secondTouchDueAt, unreachableCallDueAt, validateCallDeadline } from '../lib/leadFunnel.js';
 import { playNewLeadChime } from '../lib/notificationSound.js';
@@ -64,6 +75,17 @@ export function LeadsPage() {
     return () => clearInterval(id);
   }, []);
 
+  const branchSettingsRef = useMemo(() => (db && activeBranchId ? doc(db, 'settings', activeBranchId) : null), [activeBranchId]);
+  const { data: branchSettings } = useDoc(branchSettingsRef);
+
+  // Все ключи стадий, по которым может стоять лид — встроенные + кастомные
+  // (даже скрытые: карточка в только что скрытой стадии всё равно должна
+  // загрузиться, чтобы columnKeyOf увёл её в 'new', а не потерял).
+  const allStageKeys = useMemo(
+    () => [...BUILTIN_STAGE_KEYS, ...customColumns(branchSettings?.customStages).map((c) => c.key)].slice(0, 30),
+    [branchSettings],
+  );
+
   const leadsQuery = useMemo(
     () =>
       db && activeBranchId
@@ -71,11 +93,11 @@ export function LeadsPage() {
             collection(db, 'students'),
             where('branchId', '==', activeBranchId),
             where('isArchived', '==', false),
-            where('funnelStage', 'in', COLUMNS.map((c) => c.key)),
+            where('funnelStage', 'in', allStageKeys),
             orderBy('createdAt', 'desc'),
           )
         : null,
-    [activeBranchId],
+    [activeBranchId, allStageKeys],
   );
   const { data: allLeads } = useCollection(leadsQuery);
 
@@ -99,22 +121,107 @@ export function LeadsPage() {
     });
   }, [leadsQuery]);
 
-  // Название и цвет стадии редактируются через ⚙ в заголовке колонки и
-  // хранятся per-branch, а не в самом COLUMNS — ключ и порядок стадий
-  // остаются фиксированными (на них завязаны isForwardAllowed/
-  // stageDeadline/markAttempt), правится только то, что видит оператор.
-  const branchSettingsRef = useMemo(() => (db && activeBranchId ? doc(db, 'settings', activeBranchId) : null), [activeBranchId]);
-  const { data: branchSettings } = useDoc(branchSettingsRef);
-  const resolvedColumns = useMemo(() => withStageOverrides(branchSettings?.leadStageOverrides), [branchSettings]);
+  // Состав/название/цвет/порядок колонок хранятся per-branch в
+  // settings/{branchId} (leadStageOverrides / leadStageOrder / customStages /
+  // hiddenStages), не в COLUMNS: ключ встроенной стадии неизменен (на него
+  // завязаны stageDeadline/markAttempt и спец-рендер), правится только
+  // отображение и состав. Порядок колонок задаёт и правила движения карточек
+  // вперёд — см. isForwardAllowed(orderedKeys).
+  const resolvedColumns = useMemo(() => resolveColumns(branchSettings), [branchSettings]);
+  const orderedKeys = useMemo(() => resolvedColumns.map((c) => c.key), [resolvedColumns]);
+  const customStages = useMemo(() => customColumns(branchSettings?.customStages), [branchSettings]);
+  const hiddenColumns = useMemo(() => {
+    const hiddenKeys = new Set((branchSettings?.hiddenStages ?? []).filter((k) => k !== PINNED_FIRST_STAGE));
+    if (hiddenKeys.size === 0) return [];
+    return resolveColumns({ ...branchSettings, hiddenStages: [] }).filter((c) => hiddenKeys.has(c.key));
+  }, [branchSettings]);
+  // Число кружочков-попыток по стадии (настройка колонки attemptSlots).
+  const attemptSlotsByKey = useMemo(
+    () => Object.fromEntries(resolvedColumns.map((c) => [c.key, resolveAttemptSlots(c)])),
+    [resolvedColumns],
+  );
 
   const editStageColumn = (stageKey, patch) => {
     if (!branchSettingsRef) return;
     // set+merge, не update — settings/{branchId} может ещё не существовать
     // (создаётся лениво при первом сохранении любой из его настроек), а
     // merge на вложенный объект сохраняет overrides остальных стадий как есть.
+    if (customStages.some((s) => s.key === stageKey)) {
+      // У кастомной стадии label/color/attemptSlots живут в самой записи
+      // customStages, не в leadStageOverrides — правим массив.
+      const next = customStages.map((s) => (s.key === stageKey ? { ...s, ...patch } : s));
+      setDoc(branchSettingsRef, { customStages: next }, { merge: true }).catch(() =>
+        showToast('Не удалось сохранить стадию.', { type: 'error' }),
+      );
+      return;
+    }
     setDoc(branchSettingsRef, { leadStageOverrides: { [stageKey]: patch } }, { merge: true }).catch(() =>
       showToast('Не удалось сохранить стадию.', { type: 'error' }),
     );
+  };
+
+  const reorderStage = (draggedKey, targetKey) => {
+    if (!branchSettingsRef) return;
+    const next = reorderStageKeys(orderedKeys, draggedKey, targetKey);
+    if (next === orderedKeys) return;
+    setDoc(branchSettingsRef, { leadStageOrder: next }, { merge: true }).catch(() =>
+      showToast('Не удалось сохранить порядок колонок.', { type: 'error' }),
+    );
+  };
+
+  // Добавить кастомную колонку слева/справа от колонки `anchorKey` (из её
+  // поповера редактирования). Никогда не встаёт левее `new` (вход воронки).
+  const addStage = (anchorKey, side) => {
+    if (!branchSettingsRef) return;
+    if (resolvedColumns.length >= MAX_STAGES) {
+      showToast(`Максимум ${MAX_STAGES} колонок.`, { type: 'error' });
+      return;
+    }
+    const key = makeCustomStageKey();
+    const order = [...orderedKeys];
+    const anchorIdx = order.indexOf(anchorKey);
+    let insertAt = anchorIdx < 0 ? order.length : side === 'left' ? anchorIdx : anchorIdx + 1;
+    if (insertAt < 1) insertAt = 1;
+    order.splice(insertAt, 0, key);
+    setDoc(
+      branchSettingsRef,
+      { customStages: [...customStages, { key, label: 'Новая стадия', color: '#4B5563', attemptSlots: 0 }], leadStageOrder: order },
+      { merge: true },
+    ).catch(() => showToast('Не удалось добавить колонку.', { type: 'error' }));
+  };
+
+  // Удаление (кастомная) / скрытие (встроенная) колонки — только если в ней
+  // нет карточек. Проверку пустоты делает вызывающая сторона (LeadColumn),
+  // тут страховка на гонку.
+  const removeStage = (stageKey) => {
+    if (!branchSettingsRef || stageKey === PINNED_FIRST_STAGE) return;
+    if ((byColumn[stageKey]?.length ?? 0) > 0) {
+      showToast('В колонке есть карточки — сначала перенеси их.', { type: 'error' });
+      return;
+    }
+    const isCustom = customStages.some((s) => s.key === stageKey);
+    if (isCustom) {
+      updateDoc(branchSettingsRef, {
+        customStages: customStages.filter((s) => s.key !== stageKey),
+        leadStageOrder: orderedKeys.filter((k) => k !== stageKey),
+        [`leadStageOverrides.${stageKey}`]: deleteField(),
+      }).catch(() => showToast('Не удалось удалить колонку.', { type: 'error' }));
+      return;
+    }
+    setDoc(
+      branchSettingsRef,
+      { hiddenStages: [...new Set([...(branchSettings?.hiddenStages ?? []), stageKey])] },
+      { merge: true },
+    ).catch(() => showToast('Не удалось скрыть колонку.', { type: 'error' }));
+  };
+
+  const unhideStage = (stageKey) => {
+    if (!branchSettingsRef) return;
+    setDoc(
+      branchSettingsRef,
+      { hiddenStages: (branchSettings?.hiddenStages ?? []).filter((k) => k !== stageKey) },
+      { merge: true },
+    ).catch(() => showToast('Не удалось вернуть колонку.', { type: 'error' }));
   };
 
   // won/lost раньше скрывались за пределами текущего календарного месяца
@@ -175,15 +282,18 @@ export function LeadsPage() {
 
   const byColumn = useMemo(() => {
     const map = {};
-    for (const c of COLUMNS) map[c.key] = [];
-    for (const lead of leads) map[columnKeyOf(lead)].push(lead);
+    for (const c of resolvedColumns) map[c.key] = [];
+    for (const lead of leads) {
+      const key = columnKeyOf(lead, orderedKeys);
+      (map[key] ??= []).push(lead);
+    }
     // «Пробный назначен» — ближайший пробный первым, «Дозвон» — ближайший
     // дедлайн следующего звонка первым, а не по дате создания лида (порядок
     // остальных колонок), чтобы срочное было видно сразу.
-    map.trial_scheduled.sort((a, b) => (a.trialDate?.seconds ?? Infinity) - (b.trialDate?.seconds ?? Infinity));
-    map.calling.sort((a, b) => (a.nextCallDueAt?.seconds ?? Infinity) - (b.nextCallDueAt?.seconds ?? Infinity));
+    map.trial_scheduled?.sort((a, b) => (a.trialDate?.seconds ?? Infinity) - (b.trialDate?.seconds ?? Infinity));
+    map.calling?.sort((a, b) => (a.nextCallDueAt?.seconds ?? Infinity) - (b.nextCallDueAt?.seconds ?? Infinity));
     return map;
-  }, [leads]);
+  }, [leads, resolvedColumns, orderedKeys]);
 
   const leadsById = useMemo(() => new Map(leads.map((l) => [l.id, l])), [leads]);
 
@@ -244,15 +354,17 @@ export function LeadsPage() {
         updatedAt: serverTimestamp(),
       });
       await batch.commit();
-      if (stageFields.funnelStage === 'lost') showToast(`${lead.fullName}: 5 неудачных попыток, лид отмечен как отказ.`);
+      if (stageFields.funnelStage === 'lost') showToast(`${lead.fullName}: все попытки дозвона неудачны, лид отмечен как отказ.`);
     } catch {
       showToast('Не удалось отметить попытку.', { type: 'error' });
     }
   };
 
   const markAttempt = (lead, result) => {
+    const stageKey = columnKeyOf(lead, orderedKeys);
+    const slots = attemptSlotsByKey[stageKey] ?? 0;
     const attempts = lead.callAttempts ?? [];
-    if (attempts.length >= 5) return;
+    if (slots === 0 || attempts.length >= slots) return;
     // expectedBy — дедлайн, действовавший НА МОМЕНТ этой попытки (тот, что
     // уже лежал на лиде до неё) — нужен для разбора отклонений при отказе
     // (см. src/lib/leadDeviationAnalysis.js): «просрочка при звонке N»
@@ -261,8 +373,16 @@ export function LeadsPage() {
     // приблизительно восстанавливает дедлайн по стандартной сетке.
     const nextAttempts = [...attempts, { result, at: new Date(), expectedBy: lead.nextCallDueAt ?? null }];
 
+    // Нестандартные стадии (не new/calling): кружочки — просто счётчик
+    // попыток с историей. Без воронки, дедлайн-модалок, авто-отказа и смены
+    // стадии — только запись в callAttempts.
+    if (stageKey !== 'new' && stageKey !== 'calling') {
+      patch(lead, { callAttempts: nextAttempts });
+      return;
+    }
+
     const stageFields = {};
-    if (columnKeyOf(lead) === 'new') {
+    if (stageKey === 'new') {
       stageFields.funnelStage = 'calling';
       stageFields.stageHistory = [...(lead.stageHistory ?? []), { stage: 'calling', enteredAt: new Date() }];
     }
@@ -273,7 +393,7 @@ export function LeadsPage() {
       // отказался (см. CallSuccessOutcomeModal, план из чата).
       setSuccessOutcomeTarget({
         lead,
-        suggestedDate: nextCallDueAt(nextAttempts) ?? unreachableCallDueAt(),
+        suggestedDate: nextCallDueAt(nextAttempts, slots) ?? unreachableCallDueAt(),
         onThink: (comment, dueDate) => commitCallAttempt(lead, nextAttempts, result, { dueDate, comment, stageFields }),
         onTrial: () => {
           if (checklistBlocksLeaving(lead)) {
@@ -295,7 +415,7 @@ export function LeadsPage() {
       return;
     }
 
-    const isCold = nextAttempts.length === 5 && nextAttempts.every((a) => a.result === 'fail');
+    const isCold = nextAttempts.length >= slots && nextAttempts.every((a) => a.result === 'fail');
     if (isCold) {
       // терминальная стадия «Отказ» — дедлайну неоткуда взяться, спрашивать нечего
       commitCallAttempt(lead, nextAttempts, result, {
@@ -306,7 +426,7 @@ export function LeadsPage() {
     setDeadlineTarget({
       lead,
       title: 'Дедлайн следующего звонка',
-      suggestedDate: nextCallDueAt(nextAttempts),
+      suggestedDate: nextCallDueAt(nextAttempts, slots),
       onConfirm: (dueDate) => commitCallAttempt(lead, nextAttempts, result, { dueDate, stageFields }),
       validate: (candidate) => validateCallDeadline(candidate, nextAttempts, branchSettings?.operatorSchedules?.[lead.assignedOperator]),
     });
@@ -317,12 +437,15 @@ export function LeadsPage() {
   // «Дозвон»: ни вручную (стрелка/меню, drag-n-drop — оба идут через
   // moveLead), ни через исход успешного звонка (Запись/Отказ в
   // CallSuccessOutcomeModal). «Думает» не двигает стадию — не под гейтом.
-  const checklistBlocksLeaving = (lead) =>
-    (columnKeyOf(lead) === 'new' || columnKeyOf(lead) === 'calling') && checklistPercent(lead.checklist) === 0;
+  const checklistBlocksLeaving = (lead) => {
+    const k = columnKeyOf(lead, orderedKeys);
+    return (k === 'new' || k === 'calling') && checklistPercent(lead.checklist) === 0;
+  };
 
   const moveLead = (lead, stageKey) => {
-    if (columnKeyOf(lead) === stageKey) return;
-    if (!isForwardAllowed(columnKeyOf(lead), stageKey)) {
+    const fromKey = columnKeyOf(lead, orderedKeys);
+    if (fromKey === stageKey) return;
+    if (!isForwardAllowed(fromKey, stageKey, orderedKeys)) {
       showToast('Нельзя вернуть лида на предыдущую стадию.', { type: 'error' });
       return;
     }
@@ -345,7 +468,7 @@ export function LeadsPage() {
       setDeadlineTarget({
         lead,
         title: 'Дедлайн следующего звонка',
-        suggestedDate: nextCallDueAt(lead.callAttempts ?? []),
+        suggestedDate: nextCallDueAt(lead.callAttempts ?? [], attemptSlotsByKey.calling ?? 5),
         onConfirm: (dueDate) => commit({ nextCallDueAt: dueDate }),
         validate: (candidate) => validateCallDeadline(candidate, lead.callAttempts ?? [], branchSettings?.operatorSchedules?.[lead.assignedOperator]),
       });
@@ -509,6 +632,21 @@ export function LeadsPage() {
             )}
           />
         )}
+        {hiddenColumns.length > 0 && (
+          <DropdownMenu
+            items={hiddenColumns.map((c) => ({ label: `Вернуть: ${c.label}`, onClick: () => unhideStage(c.key) }))}
+            trigger={({ ref, toggle }) => (
+              <button
+                ref={ref}
+                type="button"
+                onClick={toggle}
+                className="rounded-full bg-surface px-3 py-1.5 text-[13px] text-muted hover:text-text"
+              >
+                {`Скрытые (${hiddenColumns.length}) ▾`}
+              </button>
+            )}
+          />
+        )}
         <button
           type="button"
           onClick={() => setDarkTheme((v) => !v)}
@@ -524,10 +662,14 @@ export function LeadsPage() {
           <LeadColumn
             key={column.key}
             column={column}
-            leads={byColumn[column.key]}
+            leads={byColumn[column.key] ?? []}
             operatorByUid={operatorByUid}
             onAdd={column.key === 'new' ? openAddForm : undefined}
             onEditColumn={editStageColumn}
+            onReorderStage={reorderStage}
+            onRemoveStage={column.key === PINNED_FIRST_STAGE ? undefined : removeStage}
+            onAddStage={addStage}
+            columnEmpty={(byColumn[column.key]?.length ?? 0) === 0}
             columns={resolvedColumns}
             onDropLead={(leadId, columnKey) => {
               const lead = leadsById.get(leadId);

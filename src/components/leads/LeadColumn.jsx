@@ -1,9 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { isToday, isTomorrow, isSameMonth, format } from 'date-fns';
 import { ru } from 'date-fns/locale';
-import { ChevronDown, ChevronRight, Info, Plus, CheckCircle2, XCircle, AlertTriangle, Sun, Clock, Calendar } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, GripVertical, CheckCircle2, XCircle, AlertTriangle, Sun, Clock, Calendar } from 'lucide-react';
 import { LeadCard } from './LeadCard.jsx';
-import { STAGE_COLOR_SWATCHES } from './columns.js';
+import { STAGE_COLOR_SWATCHES, PINNED_FIRST_STAGE, MAX_ATTEMPT_SLOTS, resolveAttemptSlots } from './columns.js';
+
+// dataTransfer-тип для перетаскивания самой колонки (порядок стадий) —
+// отдельный от 'text/plain', которым таскаются карточки лидов, чтобы
+// drop-зоны не путали одно с другим.
+const STAGE_DND_TYPE = 'application/x-stage-key';
 import { stageDeadline, LOST_REASON_OPTIONS } from '../../lib/leadFunnel.js';
 import { pluralize } from '../../lib/format.js';
 
@@ -18,72 +23,29 @@ const TONE_NAVY = 'bg-navy/15 text-navy';
 const TONE_MUTED = 'bg-border text-muted';
 
 /**
- * Значок «ⓘ» рядом с названием колонки — попап с инструкцией по работе с
- * карточками на этой стадии (`column.hint`, см. columns.js). Тот же паттерн
- * открытия/закрытия (клик вне / Escape), что у попапов на LeadCard.
- * @param {{summary: string, steps: Array<string>}} hint
- */
-function ColumnHint({ hint }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onClickOutside = (e) => {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
-    };
-    const onKeyDown = (e) => e.key === 'Escape' && setOpen(false);
-    document.addEventListener('mousedown', onClickOutside);
-    window.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('mousedown', onClickOutside);
-      window.removeEventListener('keydown', onKeyDown);
-    };
-  }, [open]);
-
-  return (
-    <div ref={ref} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-label="Как работать с карточками на этой стадии"
-        className="flex h-5 w-5 items-center justify-center rounded-full text-muted hover:bg-surface hover:text-navy"
-      >
-        <Info className="h-3.5 w-3.5" />
-      </button>
-      {open && (
-        <div className="absolute left-0 top-7 z-20 w-72 rounded-field border border-border bg-surface p-3 text-left shadow-hover">
-          <p className="mb-2 text-[13px] font-bold text-text">{hint.summary}</p>
-          <ul className="list-disc space-y-1.5 pl-4 text-[13px] text-muted">
-            {hint.steps.map((step, i) => (
-              <li key={i}>{step}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/**
  * Название колонки — само служит триггером редактирования (двойной клик),
- * без отдельной иконки-карандаша. Попап правит `label`/`color` (ключ
- * стадии и порядок неизменны, см. `withStageOverrides` в columns.js).
- * Сохранение пишет в `settings/{branchId}.leadStageOverrides.{key}` через
- * `onEdit`.
- * @param {{label: string, color: string}} props.column
- * @param {(patch: {label: string, color: string}) => void} props.onEdit
+ * без отдельной иконки-карандаша. Попап правит `label`/`color` и число
+ * кружочков-попыток на карточках (`attemptSlots`); ключ стадии и порядок
+ * тут не трогаются. Сохранение пишет в
+ * `settings/{branchId}.leadStageOverrides.{key}` через `onEdit`.
+ * @param {{key: string, label: string, color: string, attemptSlots?: number, custom?: boolean}} props.column
+ * @param {(patch: {label: string, color: string, attemptSlots: number}) => void} props.onEdit
+ * @param {() => void} [props.onRemove] удалить (кастомная) / скрыть (встроенная) колонку
+ * @param {boolean} [props.canRemove] в колонке нет карточек
+ * @param {(side: 'left' | 'right') => void} [props.onAdd] добавить колонку слева/справа
  */
-function EditableStageTitle({ column, onEdit }) {
+function EditableStageTitle({ column, onEdit, onRemove, canRemove, onAdd }) {
   const [open, setOpen] = useState(false);
   const [label, setLabel] = useState(column.label);
   const [color, setColor] = useState(column.color);
+  const [slots, setSlots] = useState(resolveAttemptSlots(column));
   const ref = useRef(null);
 
   useEffect(() => {
     if (!open) return;
     setLabel(column.label);
     setColor(column.color);
+    setSlots(resolveAttemptSlots(column));
     const onClickOutside = (e) => {
       if (ref.current && !ref.current.contains(e.target)) setOpen(false);
     };
@@ -94,12 +56,13 @@ function EditableStageTitle({ column, onEdit }) {
       document.removeEventListener('mousedown', onClickOutside);
       window.removeEventListener('keydown', onKeyDown);
     };
-  }, [open, column.label, column.color]);
+  }, [open, column]);
 
   const save = () => {
     const trimmed = label.trim();
     if (!trimmed) return;
-    onEdit({ label: trimmed, color });
+    const clampedSlots = Math.max(0, Math.min(MAX_ATTEMPT_SLOTS, Math.round(Number(slots) || 0)));
+    onEdit({ label: trimmed, color, attemptSlots: clampedSlots });
     setOpen(false);
   };
 
@@ -139,6 +102,62 @@ function EditableStageTitle({ column, onEdit }) {
               />
             ))}
           </div>
+          <label className="mb-3 block">
+            <span className="mb-1 block text-[12px] text-muted">Кружочков на карточке (0 — нет)</span>
+            <input
+              type="number"
+              min={0}
+              max={MAX_ATTEMPT_SLOTS}
+              value={slots}
+              onChange={(e) => setSlots(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && save()}
+              className="h-9 w-full rounded-field border border-border-strong bg-white px-2.5 text-[13px] text-text focus:border-navy focus:outline-none"
+            />
+          </label>
+          {(onAdd || onRemove) && (
+            <div className="mb-3 border-t border-border pt-3">
+              {onAdd && (
+                <div className="mb-1 flex gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onAdd('left');
+                      setOpen(false);
+                    }}
+                    className="flex-1 rounded-field px-2.5 py-1.5 text-[12px] font-bold text-navy hover:bg-navy/10"
+                  >
+                    + Столбец слева
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onAdd('right');
+                      setOpen(false);
+                    }}
+                    className="flex-1 rounded-field px-2.5 py-1.5 text-[12px] font-bold text-navy hover:bg-navy/10"
+                  >
+                    + Столбец справа
+                  </button>
+                </div>
+              )}
+              {onRemove && (
+                <>
+                  <button
+                    type="button"
+                    disabled={!canRemove}
+                    onClick={() => {
+                      onRemove();
+                      setOpen(false);
+                    }}
+                    className="w-full rounded-field px-2.5 py-1.5 text-left text-[12px] font-bold text-danger hover:bg-danger/10 disabled:cursor-not-allowed disabled:text-muted disabled:hover:bg-transparent"
+                  >
+                    {column.custom ? 'Удалить колонку' : 'Скрыть колонку'}
+                  </button>
+                  {!canRemove && <p className="mt-1 text-[11px] text-muted">В колонке есть карточки — сначала перенеси их.</p>}
+                </>
+              )}
+            </div>
+          )}
           <div className="flex justify-end gap-2">
             <button
               type="button"
@@ -394,10 +413,18 @@ function humanizeReasonKey(key) {
  * @param {Map<string, {color?: string, name: string}>} props.operatorByUid
  * @param {() => void} props.onAdd
  * @param {(leadId: string, columnKey: string) => void} props.onDropLead
- * @param {(columnKey: string, patch: {label: string, color: string}) => void} props.onEditColumn
+ * @param {(columnKey: string, patch: {label: string, color: string, attemptSlots: number}) => void} props.onEditColumn
+ * @param {(draggedKey: string, targetKey: string) => void} [props.onReorderStage] перетаскивание заголовка колонки
+ * @param {(stageKey: string) => void} [props.onRemoveStage] удалить/скрыть колонку
+ * @param {(anchorKey: string, side: 'left' | 'right') => void} [props.onAddStage] добавить колонку рядом
+ * @param {boolean} [props.columnEmpty] в колонке нет карточек
  */
-export function LeadColumn({ column, leads, operatorByUid, onAdd, onDropLead, onEditColumn, ...cardActions }) {
+export function LeadColumn({ column, leads, operatorByUid, onAdd, onDropLead, onEditColumn, onReorderStage, onRemoveStage, onAddStage, columnEmpty, ...cardActions }) {
   const [dragOver, setDragOver] = useState(false);
+  const [stageDragging, setStageDragging] = useState(false);
+  const [stageDragOver, setStageDragOver] = useState(false);
+  // Первую колонку (вход воронки) не двигаем и на её место не роняем.
+  const canReorder = Boolean(onReorderStage) && column.key !== PINNED_FIRST_STAGE;
   const isTrialScheduled = column.key === 'trial_scheduled';
   const isWon = column.key === 'won';
   const isLost = column.key === 'lost';
@@ -410,15 +437,63 @@ export function LeadColumn({ column, leads, operatorByUid, onAdd, onDropLead, on
     [isWon, isLost, leads],
   );
 
+  // Куда встанет колонка при drop — можно ронять на любой заголовок, кроме
+  // первой закреплённой колонки (canReorder уже это учёл) и самой себя.
+  const acceptsStageDrop = Boolean(onReorderStage) && column.key !== PINNED_FIRST_STAGE;
+  const onStageDragOver = (e) => {
+    if (!acceptsStageDrop || !e.dataTransfer.types.includes(STAGE_DND_TYPE)) return;
+    e.preventDefault();
+    setStageDragOver(true);
+  };
+  const onStageDrop = (e) => {
+    if (!acceptsStageDrop || !e.dataTransfer.types.includes(STAGE_DND_TYPE)) return;
+    e.preventDefault();
+    setStageDragOver(false);
+    const draggedKey = e.dataTransfer.getData(STAGE_DND_TYPE);
+    if (draggedKey && draggedKey !== column.key) onReorderStage(draggedKey, column.key);
+  };
+
   return (
-    <div className="flex w-80 shrink-0 flex-col overflow-hidden rounded-card bg-surface-alt">
-      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-1.5 border-b-2 px-4 py-3" style={{ borderBottomColor: column.color }}>
-        <span className="flex min-w-0 items-center gap-1.5 justify-self-start">
-          {column.hint && <ColumnHint hint={column.hint} />}
+    <div
+      className={`flex w-80 shrink-0 flex-col overflow-hidden rounded-card bg-surface-alt transition-opacity ${stageDragging ? 'opacity-40' : ''}`}
+    >
+      <div
+        onDragOver={onStageDragOver}
+        onDragLeave={() => setStageDragOver(false)}
+        onDrop={onStageDrop}
+        className={`grid grid-cols-[1fr_auto_1fr] items-center gap-1.5 border-b-2 px-4 py-3 ${stageDragOver ? 'bg-navy/10' : ''}`}
+        style={{ borderBottomColor: column.color }}
+      >
+        <span className="flex min-w-0 items-center gap-1 justify-self-start">
+          {canReorder && (
+            <span
+              draggable
+              onDragStart={(e) => {
+                e.dataTransfer.setData(STAGE_DND_TYPE, column.key);
+                e.dataTransfer.effectAllowed = 'move';
+                setStageDragging(true);
+              }}
+              onDragEnd={() => {
+                setStageDragging(false);
+                setStageDragOver(false);
+              }}
+              title="Перетащить — изменить порядок колонок"
+              aria-label="Перетащить колонку"
+              className="flex h-5 w-4 shrink-0 cursor-grab items-center justify-center text-muted hover:text-text active:cursor-grabbing"
+            >
+              <GripVertical className="h-4 w-4" />
+            </span>
+          )}
         </span>
         <span className="min-w-0 justify-self-center">
           {onEditColumn ? (
-            <EditableStageTitle column={column} onEdit={(patch) => onEditColumn(column.key, patch)} />
+            <EditableStageTitle
+              column={column}
+              onEdit={(patch) => onEditColumn(column.key, patch)}
+              onRemove={onRemoveStage ? () => onRemoveStage(column.key) : undefined}
+              canRemove={columnEmpty}
+              onAdd={onAddStage ? (side) => onAddStage(column.key, side) : undefined}
+            />
           ) : (
             <span className="truncate text-[15px] font-bold uppercase tracking-wide text-text">{column.label}</span>
           )}
@@ -439,11 +514,13 @@ export function LeadColumn({ column, leads, operatorByUid, onAdd, onDropLead, on
       </div>
       <div
         onDragOver={(e) => {
+          if (e.dataTransfer.types.includes(STAGE_DND_TYPE)) return; // тащат колонку, не карточку
           e.preventDefault();
           setDragOver(true);
         }}
         onDragLeave={() => setDragOver(false)}
         onDrop={(e) => {
+          if (e.dataTransfer.types.includes(STAGE_DND_TYPE)) return;
           e.preventDefault();
           setDragOver(false);
           const leadId = e.dataTransfer.getData('text/plain');

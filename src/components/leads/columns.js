@@ -118,55 +118,179 @@ export const STAGE_COLOR_SWATCHES = [
 ];
 
 /**
- * Применяет пользовательские правки названия/цвета стадии (см.
- * `settings/{branchId}.leadStageOverrides`, редактируется через ⚙ в
- * заголовке колонки) поверх дефолтных COLUMNS. Ключ и порядок стадий
- * править нельзя — только `label` и `color`, чтобы не сломать
- * `isForwardAllowed`/`stageDeadline`, которые матчатся на `key`.
- * @param {Record<string, {label?: string, color?: string}>} [overrides]
- * @returns {typeof COLUMNS}
+ * Первая колонка — вход воронки (кнопка «+», авто-назначение оператора,
+ * авто-переход new→calling при первой отметке звонка). Её позицию менять
+ * нельзя: всегда слева, всегда стартовая стадия.
  */
-export function withStageOverrides(overrides) {
-  if (!overrides) return COLUMNS;
-  return COLUMNS.map((c) => (overrides[c.key] ? { ...c, ...overrides[c.key] } : c));
+export const PINNED_FIRST_STAGE = 'new';
+
+/** Терминальные стадии — карточка, попав туда, дальше не двигается. */
+export const TERMINAL_STAGES = ['won', 'lost'];
+
+/** Ключи встроенных стадий — их код знает «в лицо» (спец-рендер, дедлайны, воронка). */
+export const BUILTIN_STAGE_KEYS = COLUMNS.map((c) => c.key);
+
+/** Потолок общего числа колонок (Firestore `in`-запрос по funnelStage — до 30 значений). */
+export const MAX_STAGES = 20;
+
+/** Свежий ключ кастомной стадии — `custom_` + рандом, не пересекается со встроенными. */
+export function makeCustomStageKey() {
+  return `custom_${Math.random().toString(36).slice(2, 8)}${Date.now().toString(36).slice(-3)}`;
 }
 
 /**
- * Разрешённые ручные переходы вперёд (стрелка/drag), по стадии-источнику.
- * Не строгая цепочка — из «Новый лид» лид может уйти либо в «Дозвон», либо
- * сразу в «Пробный назначен» (лид согласился на пробный при первом же
- * звонке, до формальной отметки в «Дозвоне»). 'lost' сюда не входит —
- * разрешён универсально из любой нетерминальной стадии, см. ниже.
+ * Кастомная стадия из настроек → форма колонки (как во встроенном COLUMNS,
+ * но без `hint` и спец-поведения). Невалидные записи отсеиваются.
+ * @param {Array<{key: string, label: string, color?: string, attemptSlots?: number}>} [customStages]
+ * @returns {Array<{key: string, label: string, color: string, custom: true, attemptSlots?: number}>}
  */
-const FORWARD_TRANSITIONS = {
-  new: ['calling', 'trial_scheduled'],
-  calling: ['trial_scheduled'],
-  trial_scheduled: ['trial_completed'],
-  trial_completed: ['closing', 'won'],
-  closing: [],
-};
+export function customColumns(customStages) {
+  if (!Array.isArray(customStages)) return [];
+  return customStages
+    .filter((s) => s && typeof s.key === 'string' && s.key.startsWith('custom_') && typeof s.label === 'string')
+    .map((s) => ({
+      key: s.key,
+      label: s.label,
+      color: s.color || '#4B5563',
+      custom: true,
+      ...(Number.isFinite(s.attemptSlots) ? { attemptSlots: s.attemptSlots } : {}),
+    }));
+}
+
+/** Верхний предел кружочков-попыток на карточке (настройка колонки). */
+export const MAX_ATTEMPT_SLOTS = 12;
+
+// Сколько кружочков-попыток дозвона на карточке по умолчанию (пока в
+// настройках колонки не задано `attemptSlots`). Только new/calling — это
+// «звонковые» стадии; на остальных кружочков нет, пока их явно не включат.
+const DEFAULT_ATTEMPT_SLOTS = { new: 5, calling: 5 };
 
 /**
- * Стадия, в которой сейчас находится лид. Дефолт 'new' — для лидов без
- * funnelStage (до миграции, см. scripts/backfill-funnel-stage.mjs) и для
- * newly-created документов до записи поля.
+ * Сколько кружочков-попыток показывать на карточках этой колонки:
+ * `attemptSlots` из настроек колонки, иначе дефолт по ключу стадии.
+ * @param {{key: string, attemptSlots?: number}} column
+ * @returns {number} 0 — кружочков нет
+ */
+export function resolveAttemptSlots(column) {
+  const raw = column?.attemptSlots;
+  if (Number.isFinite(raw)) return Math.max(0, Math.min(MAX_ATTEMPT_SLOTS, Math.round(raw)));
+  return DEFAULT_ATTEMPT_SLOTS[column?.key] ?? 0;
+}
+
+/**
+ * Применяет пользовательские правки названия/цвета/кружочков стадии (см.
+ * `settings/{branchId}.leadStageOverrides`, двойной клик по заголовку)
+ * поверх набора колонок. Ключ стадии неизменен (на него завязаны
+ * `stageDeadline` и спец-рендер `trial_scheduled`/`won`/`lost`). Порядок и
+ * состав задаются отдельно, см. `resolveColumns`.
+ * @param {Array<{key: string}>} cols
+ * @param {Record<string, {label?: string, color?: string, attemptSlots?: number}>} [overrides]
+ * @returns {Array<{key: string}>}
+ */
+export function withStageOverrides(cols, overrides) {
+  if (!overrides) return cols;
+  return cols.map((c) => (overrides[c.key] ? { ...c, ...overrides[c.key] } : c));
+}
+
+/**
+ * Колонки доски в порядке отображения: встроенные + кастомные
+ * (`customStages`), минус скрытые (`hiddenStages`, `new` не скрывается
+ * никогда), плюс правки label/color/attemptSlots (`leadStageOverrides`),
+ * плюс порядок (`leadStageOrder` — массив ключей). Неизвестные ключи в
+ * порядке игнорируются, недостающие дописываются в хвост. `new` всегда
+ * первым (см. PINNED_FIRST_STAGE).
+ * @param {Object} [settings] документ settings/{branchId}
+ * @param {Record<string, Object>} [settings.leadStageOverrides]
+ * @param {string[]} [settings.leadStageOrder]
+ * @param {Array<Object>} [settings.customStages]
+ * @param {string[]} [settings.hiddenStages]
+ * @returns {Array<{key: string, label: string, color: string, custom?: boolean}>}
+ */
+export function resolveColumns(settings) {
+  const s = settings ?? {};
+  const hidden = new Set((s.hiddenStages ?? []).filter((k) => k !== PINNED_FIRST_STAGE));
+  let cols = [...COLUMNS, ...customColumns(s.customStages)].filter((c) => !hidden.has(c.key));
+  cols = withStageOverrides(cols, s.leadStageOverrides);
+
+  const order = s.leadStageOrder;
+  if (order?.length) {
+    const byKey = new Map(cols.map((c) => [c.key, c]));
+    const seen = new Set();
+    const result = [];
+    for (const key of order) {
+      const col = byKey.get(key);
+      if (col && !seen.has(key)) {
+        result.push(col);
+        seen.add(key);
+      }
+    }
+    for (const col of cols) if (!seen.has(col.key)) result.push(col);
+    cols = result;
+  }
+
+  const firstIdx = cols.findIndex((c) => c.key === PINNED_FIRST_STAGE);
+  if (firstIdx > 0) cols.unshift(cols.splice(firstIdx, 1)[0]);
+  return cols;
+}
+
+/**
+ * Новый порядок ключей после перетаскивания колонки `draggedKey` на место
+ * колонки `targetKey`. `new` не двигается и на его место ничего не встаёт.
+ * Вставка «куда указал»: тащишь вправо — встаёт после target, влево — перед.
+ * @param {string[]} currentKeys текущий порядок (все ключи стадий)
+ * @param {string} draggedKey
+ * @param {string} targetKey
+ * @returns {string[]} новый порядок (та же длина); тот же массив, если ход невозможен
+ */
+export function reorderStageKeys(currentKeys, draggedKey, targetKey) {
+  if (draggedKey === targetKey || draggedKey === PINNED_FIRST_STAGE || targetKey === PINNED_FIRST_STAGE) {
+    return currentKeys;
+  }
+  const from = currentKeys.indexOf(draggedKey);
+  const to = currentKeys.indexOf(targetKey);
+  if (from < 0 || to < 0) return currentKeys;
+
+  const keys = [...currentKeys];
+  keys.splice(from, 1);
+  const targetIdx = keys.indexOf(targetKey);
+  keys.splice(from < to ? targetIdx + 1 : targetIdx, 0, draggedKey);
+  return keys;
+}
+
+/**
+ * Ключ колонки, в которой рендерится лид. Дефолт 'new' — для лидов без
+ * funnelStage (до миграции) и для тех, чья стадия сейчас не показывается на
+ * доске (скрыта или кастомная стадия удалена) — иначе карточка потерялась
+ * бы. `knownKeys` — ключи колонок, реально присутствующих на доске (из
+ * `resolveColumns`); без него проверяются только встроенные.
  * @param {Object} lead
- * @returns {string} один из ключей COLUMNS
+ * @param {string[]} [knownKeys]
+ * @returns {string}
  */
-export function columnKeyOf(lead) {
-  return COLUMNS.some((c) => c.key === lead.funnelStage) ? lead.funnelStage : 'new';
+export function columnKeyOf(lead, knownKeys) {
+  const keys = knownKeys ?? BUILTIN_STAGE_KEYS;
+  return keys.includes(lead.funnelStage) ? lead.funnelStage : 'new';
 }
 
 /**
- * Разрешён ли переход `from → to`: см. FORWARD_TRANSITIONS, либо в 'lost'
- * из любой нетерминальной стадии. 'won'/'lost' — терминальные, из них
- * переходов нет вовсе.
+ * Разрешён ли переход `from → to`. «Вперёд» = целевая колонка правее
+ * текущей в порядке доски (`orderedKeys`, см. `resolveColumns`) — прыжки
+ * через промежуточные стадии разрешены. Исключения:
+ * — 'won'/'lost' терминальны, из них переходов нет;
+ * — в 'lost' можно из любой нетерминальной стадии независимо от позиции
+ *   колонки «Отказ» (отказать можно всегда);
+ * — назад в 'new' (вход воронки) — нельзя, только через «Вернуть в новый лид».
  * @param {string} from
  * @param {string} to
+ * @param {string[]} orderedKeys порядок ключей колонок на доске
  * @returns {boolean}
  */
-export function isForwardAllowed(from, to) {
-  if (from === 'won' || from === 'lost') return false;
+export function isForwardAllowed(from, to, orderedKeys = COLUMNS.map((c) => c.key)) {
+  if (TERMINAL_STAGES.includes(from)) return false;
+  if (to === PINNED_FIRST_STAGE) return false;
   if (to === 'lost') return true;
-  return (FORWARD_TRANSITIONS[from] ?? []).includes(to);
+  const fromIdx = orderedKeys.indexOf(from);
+  const toIdx = orderedKeys.indexOf(to);
+  if (fromIdx < 0 || toIdx < 0) return false;
+  return toIdx > fromIdx;
 }

@@ -7,7 +7,7 @@ import { db } from '../../firebase.js';
 import { useAuth } from '../../hooks/useAuth.js';
 import { useCollection } from '../../hooks/useCollection.js';
 import { DropdownMenu } from '../ui/DropdownMenu.jsx';
-import { COLUMNS, isForwardAllowed } from './columns.js';
+import { COLUMNS, isForwardAllowed, resolveAttemptSlots } from './columns.js';
 import { isPriorityLead, isTrialDay, contactDueDate, stageDeadline, overdueReasonLabel, LOST_REASON_OPTIONS } from '../../lib/leadFunnel.js';
 import { formatPhone, formatDateTime, formatDateTimeShort, formatRelativeDeadline, formatRelativeDay, formatOverdueBy, formatSource } from '../../lib/format.js';
 import { LEAD_CHECKLIST_ITEMS, checklistCheckedCount, checklistPercent } from '../../lib/leadChecklist.js';
@@ -144,7 +144,6 @@ export function trialScheduleLabel(lead) {
   return course ? `${course} - ${weekdayCap} - ${time}` : `${weekdayCap} - ${time}`;
 }
 
-const MAX_ATTEMPTS = 5;
 const UNREACHABLE_MAX_ATTEMPTS = 3;
 
 /** Триггер-точка попытки — общий для CallAttemptDots и UnreachableBlock. */
@@ -163,20 +162,22 @@ function AttemptDot({ ref, toggle, ariaLabel }) {
 }
 
 /**
- * Ряд из 5 точек — попытки дозвона, см. 2026-08-12-lead-card-call-attempts-design.md.
- * Меню выбора результата — через DropdownMenu (портал, `position: fixed`) —
- * точка попытки лежит у левого края узкой карточки в канбане, обычный
- * absolute-попап вылезал за край карточки и обрезался/наезжал на соседнюю
- * колонку.
+ * Ряд точек — попытки дозвона, см. 2026-08-12-lead-card-call-attempts-design.md.
+ * Число точек (`slots`) — настройка колонки (`attemptSlots`, см.
+ * columns.js/resolveAttemptSlots); ряд переносится по строке, если точек
+ * много. Меню выбора результата — через DropdownMenu (портал,
+ * `position: fixed`) — точка попытки лежит у левого края узкой карточки в
+ * канбане, обычный absolute-попап вылезал за край карточки и обрезался/
+ * наезжал на соседнюю колонку.
  */
-function CallAttemptDots({ attempts, onMark, nextCallDueAt }) {
-  const isCold = attempts.length === MAX_ATTEMPTS && attempts.every((a) => a.result === 'fail');
+function CallAttemptDots({ attempts, onMark, nextCallDueAt, slots }) {
+  const isCold = attempts.length >= slots && slots > 0 && attempts.every((a) => a.result === 'fail');
   const deadlineLabel = !isCold && nextCallDueAt ? formatRelativeDeadline(nextCallDueAt) : null;
 
   return (
     <div className="flex items-center gap-2">
-      <div className="flex items-center gap-1.5">
-        {Array.from({ length: MAX_ATTEMPTS }, (_, i) => {
+      <div className="flex flex-wrap items-center gap-1.5">
+        {Array.from({ length: slots }, (_, i) => {
           const attempt = attempts[i];
           if (attempt) {
             const Icon = attempt.result === 'success' ? CheckCircle2 : XCircle;
@@ -216,7 +217,7 @@ function CallAttemptDots({ attempts, onMark, nextCallDueAt }) {
         })}
       </div>
       {isCold && (
-        <span title="Холодный лид: 5 неудачных попыток дозвона" className="flex items-center">
+        <span title="Все попытки дозвона неудачны" className="flex items-center">
           <Snowflake className="h-4 w-4 text-danger" />
         </span>
       )}
@@ -470,6 +471,8 @@ export function LeadCard({
   const stage = lead.funnelStage ?? 'new';
   const isTerminal = stage === 'won' || stage === 'lost';
   const attempts = lead.callAttempts ?? [];
+  // Сколько кружочков-попыток на карточке — настройка текущей колонки.
+  const attemptSlots = resolveAttemptSlots(columns.find((c) => c.key === stage) ?? { key: stage });
   const operatorLabel = operatorInitials(operatorName);
   const [commentsOpen, setCommentsOpen] = useState(false);
   const hasComments = (lead.commentsCount ?? 0) > 0;
@@ -518,8 +521,9 @@ export function LeadCard({
     ...(stage !== 'new' && stage !== 'won' ? [{ label: 'Вернуть в новый лид', danger: true, onClick: () => onResetToNew(lead) }] : []),
   ];
 
+  const orderedKeys = columns.map((c) => c.key);
   const moveItems = columns.filter(
-    (c) => isForwardAllowed(stage, c.key),
+    (c) => isForwardAllowed(stage, c.key, orderedKeys),
   ).map((c) => ({
     label: c.label,
     danger: c.key === 'lost',
@@ -587,9 +591,14 @@ export function LeadCard({
         </div>
       </div>
 
-      {(stage === 'new' || stage === 'calling') && (
+      {attemptSlots > 0 && (
         <div onClick={(e) => e.stopPropagation()}>
-          <CallAttemptDots attempts={attempts} onMark={(result) => onMarkAttempt(lead, result)} nextCallDueAt={lead.nextCallDueAt} />
+          <CallAttemptDots
+            attempts={attempts}
+            onMark={(result) => onMarkAttempt(lead, result)}
+            nextCallDueAt={lead.nextCallDueAt}
+            slots={attemptSlots}
+          />
         </div>
       )}
 
