@@ -287,10 +287,10 @@ function OverdueBadge({ reason, deadline, overdueBy }) {
 }
 
 /**
- * Иконка «i» — доп. информация о лиде (ответы на вопросы из синка Google
- * Sheets, см. appsscript/SheetsSync.gs — russianLevel/livesInTashkent/
- * russianLearningReason), скрытая с карточки по умолчанию, чтобы не
- * загромождать компактный вид. Рендерится только если есть что показывать.
+ * Иконка «i» — доп. информация о лиде: ответы на вопросы формы
+ * (`lead.formAnswers`, `vacancyName` и т.п.), скрытая с карточки по
+ * умолчанию, чтобы не загромождать компактный вид. Рендерится только если
+ * есть что показывать; длинный список скроллится внутри попапа.
  * @param {Array<{question: string, answer: string}>} items
  */
 function LeadInfoPopover({ items }) {
@@ -322,7 +322,7 @@ function LeadInfoPopover({ items }) {
         <Info className="h-3.5 w-3.5" />
       </button>
       {open && (
-        <div className="absolute inset-x-2.5 top-7 z-20 flex flex-col gap-2 rounded-field border border-border bg-surface p-3 shadow-hover">
+        <div className="absolute inset-x-2.5 top-7 z-20 flex max-h-[60vh] flex-col gap-2 overflow-y-auto rounded-field border border-border bg-surface p-3 shadow-hover">
           {items.map((item, i) => (
             <div key={i}>
               <p className="text-[11px] leading-snug text-muted">{item.question}</p>
@@ -495,10 +495,12 @@ export function LeadCard({
   // не отработан первый SLA на стадии 'new'; дальше по воронке не показываем.
   const priority = stage === 'new' && createdAt ? isPriorityLead(createdAt) : false;
 
-  // Ответы на вопросы из синка Google Sheets (appsscript/SheetsSync.gs) —
-  // russianLevel с прошлой таблицы, остальные два с текущей. Каждое поле
-  // независимо опционально, в попап «i» попадают только заполненные.
+  // Ответы на вопросы формы (appsscript/VacancyLeadsSync.gs пишет
+  // `formAnswers: [{question, answer}]`; SheetsSync.gs с прошлых таблиц —
+  // отдельные поля russianLevel/…). В попап «i» попадают только заполненные.
   const infoItems = [
+    lead.vacancyName && { question: 'Вакансия', answer: lead.vacancyName },
+    ...(Array.isArray(lead.formAnswers) ? lead.formAnswers.filter((a) => a && a.answer) : []),
     lead.russianLevel && { question: 'Rus tilida qanday darajadasiz?', answer: lead.russianLevel },
     lead.russianLearningReason && { question: "Rus tilini nima sababdan o'rganmoqchisiz?", answer: lead.russianLearningReason },
     lead.livesInTashkent && { question: 'Toshkentda yashaysizmi?', answer: lead.livesInTashkent },
