@@ -40,6 +40,7 @@
 var FORM_NAME_HINTS = ['ism', 'имя', 'фио', 'ф.и.о', 'исм', 'familiya'];
 var FORM_PHONE_HINTS = ['raqam', 'telefon', 'телефон', 'номер', 'aloqa'];
 var FORM_VACANCY_HINTS = ['vakansiya', 'vakansiyaga', 'vazifa', 'lavozim', 'вакансия', 'должность', 'позиция'];
+var FORM_TELEGRAM_HINTS = ['telegram', 'телеграм', 'tg username', 'tg:'];
 
 /**
  * Триггер «при отправке формы» (устанавливается form_installTrigger).
@@ -51,7 +52,7 @@ function form_onSubmit(e) {
     return;
   }
 
-  var picked = { name: '', phone: '', vacancyName: '', answers: [] };
+  var picked = { name: '', phone: '', vacancyName: '', telegram: '', answers: [] };
   Object.keys(e.namedValues).forEach(function (question) {
     var answer = (e.namedValues[question] || []).join(', ').trim();
     if (!answer) return;
@@ -69,6 +70,14 @@ function form_onSubmit(e) {
     }
     if (!picked.vacancyName && form_matches_(q, FORM_VACANCY_HINTS)) {
       picked.vacancyName = answer;
+      return;
+    }
+    if (!picked.telegram && form_matches_(q, FORM_TELEGRAM_HINTS)) {
+      // чистый хэндл: без @, без ссылки-обёртки, первое «слово»
+      picked.telegram = answer
+        .replace(/^https?:\/\/(t\.me|telegram\.me)\//i, '')
+        .replace(/^@+/, '')
+        .split(/[\/?\s]/)[0];
       return;
     }
     picked.answers.push({ question: String(question).replace(/\s+/g, ' ').trim(), answer: answer });
@@ -89,6 +98,7 @@ function form_onSubmit(e) {
     phone2: null,
     branchId: props.getProperty('DEFAULT_BRANCH_ID') || 'main',
     vacancyName: picked.vacancyName || '',
+    telegram: picked.telegram || '',
     formAnswers: picked.answers,
     source: 'vacancy_form',
     status: 'lead',

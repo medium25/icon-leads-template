@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { collection, addDoc, doc, updateDoc, increment, query, where, orderBy, serverTimestamp } from 'firebase/firestore';
-import { CheckCircle2, XCircle, Circle, Snowflake, ArrowRight, PhoneOff, MessageSquare, ListChecks, Clock, Users, X } from 'lucide-react';
+import { CheckCircle2, XCircle, Circle, Snowflake, ArrowRight, PhoneOff, MessageSquare, ListChecks, Clock, Users, X, Send } from 'lucide-react';
 import { db } from '../../firebase.js';
 import { useAuth } from '../../hooks/useAuth.js';
 import { useCollection } from '../../hooks/useCollection.js';
@@ -463,12 +463,29 @@ export function LeadCard({
   // не отработан первый SLA на стадии 'new'; дальше по воронке не показываем.
   const priority = stage === 'new' && createdAt ? isPriorityLead(createdAt) : false;
 
-  // Ответы на вопросы формы (appsscript/VacancyLeadsSync.gs пишет
-  // `formAnswers: [{question, answer}]`; SheetsSync.gs с прошлых таблиц —
-  // отдельные поля russianLevel/…). Показываются прямо на карточке
-  // прокручиваемым блоком; в список попадают только заполненные.
+  // Telegram-username — своё поле `lead.telegram` (пишет FormLeadsSync.gs)
+  // или, для старых лидов, вытаскиваем из formAnswers по вопросу «telegram».
+  // Нормализуем к чистому хэндлу для ссылки t.me/<handle>.
+  const telegramHandle = (() => {
+    const raw =
+      lead.telegram ||
+      (Array.isArray(lead.formAnswers) ? lead.formAnswers.find((a) => /telegram/i.test(a?.question || ''))?.answer : null);
+    if (!raw) return null;
+    const handle = String(raw)
+      .trim()
+      .replace(/^https?:\/\/(t\.me|telegram\.me)\//i, '')
+      .replace(/^@+/, '')
+      .split(/[/?\s]/)[0];
+    return /^[A-Za-z0-9_]{3,}$/.test(handle) ? handle : null;
+  })();
+
+  // Ответы на вопросы формы (formAnswers: [{question, answer}]; старые поля
+  // russianLevel/… с прошлых таблиц). Показываются прямо на карточке
+  // прокручиваемым блоком. Telegram оттуда убираем — он уже рядом с телефоном.
   const infoItems = [
-    ...(Array.isArray(lead.formAnswers) ? lead.formAnswers.filter((a) => a && a.answer) : []),
+    ...(Array.isArray(lead.formAnswers)
+      ? lead.formAnswers.filter((a) => a && a.answer && !/telegram/i.test(a.question || ''))
+      : []),
     lead.russianLevel && { question: 'Rus tilida qanday darajadasiz?', answer: lead.russianLevel },
     lead.russianLearningReason && { question: "Rus tilini nima sababdan o'rganmoqchisiz?", answer: lead.russianLearningReason },
     lead.livesInTashkent && { question: 'Toshkentda yashaysizmi?', answer: lead.livesInTashkent },
@@ -552,17 +569,29 @@ export function LeadCard({
             )
           )}
         </div>
-        <div className="flex shrink-0 items-center gap-1">
-          {trialConfirmAtRisk && <PhoneOff className="h-3.5 w-3.5 text-orange" aria-label="Не берёт трубку — подтверждение пробного" />}
-          <a href={`tel:+${lead.phone}`} onClick={(e) => e.stopPropagation()} className="truncate text-[12px] text-link">
-            {formatPhone(lead.phone)}
-          </a>
+        <div className="flex min-w-0 shrink items-center gap-1">
+          {trialConfirmAtRisk && <PhoneOff className="h-3.5 w-3.5 shrink-0 text-orange" aria-label="Не берёт трубку — подтверждение пробного" />}
+          {lead.vacancyName && (
+            <span className="truncate text-[12px] font-bold text-navy">{lead.vacancyName}</span>
+          )}
         </div>
       </div>
 
-      {lead.vacancyName && (
-        <p className="-mt-1 truncate text-[12px] font-bold text-navy">{lead.vacancyName}</p>
-      )}
+      <div className="-mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[12px]" onClick={(e) => e.stopPropagation()}>
+        <a href={`tel:+${lead.phone}`} className="text-link">
+          {formatPhone(lead.phone)}
+        </a>
+        {telegramHandle && (
+          <a
+            href={`https://t.me/${telegramHandle}`}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-0.5 text-link"
+          >
+            <Send className="h-3 w-3" />@{telegramHandle}
+          </a>
+        )}
+      </div>
 
       {attemptSlots > 0 && (
         <div onClick={(e) => e.stopPropagation()}>
