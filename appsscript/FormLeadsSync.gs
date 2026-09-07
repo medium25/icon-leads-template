@@ -36,9 +36,10 @@
 // --- ключевые слова для распознавания полей (регистр не важен) ------------
 // Заголовок вопроса, содержащий одно из этих слов, трактуется как имя/
 // телефон/вакансия. Всё, что не распозналось, идёт в formAnswers.
-var FORM_NAME_HINTS = ['ism', 'имя', 'фио', 'name', 'full name'];
-var FORM_PHONE_HINTS = ['raqam', 'telefon', 'тел', 'phone', 'номер', 'нмер'];
-var FORM_VACANCY_HINTS = ['vakansiya', 'vazifa', 'lavozim', 'вакансия', 'должность', 'позиция'];
+// «name» намеренно НЕ в списке имени — оно ловит «Telegram username».
+var FORM_NAME_HINTS = ['ism', 'имя', 'фио', 'ф.и.о', 'исм', 'familiya'];
+var FORM_PHONE_HINTS = ['raqam', 'telefon', 'телефон', 'номер', 'aloqa'];
+var FORM_VACANCY_HINTS = ['vakansiya', 'vakansiyaga', 'vazifa', 'lavozim', 'вакансия', 'должность', 'позиция'];
 
 /**
  * Триггер «при отправке формы» (устанавливается form_installTrigger).
