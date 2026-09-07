@@ -468,7 +468,6 @@ export function LeadCard({
   // отдельные поля russianLevel/…). Показываются прямо на карточке
   // прокручиваемым блоком; в список попадают только заполненные.
   const infoItems = [
-    lead.vacancyName && { question: 'Вакансия', answer: lead.vacancyName },
     ...(Array.isArray(lead.formAnswers) ? lead.formAnswers.filter((a) => a && a.answer) : []),
     lead.russianLevel && { question: 'Rus tilida qanday darajadasiz?', answer: lead.russianLevel },
     lead.russianLearningReason && { question: "Rus tilini nima sababdan o'rganmoqchisiz?", answer: lead.russianLearningReason },
@@ -560,6 +559,10 @@ export function LeadCard({
           </a>
         </div>
       </div>
+
+      {lead.vacancyName && (
+        <p className="-mt-1 truncate text-[12px] font-bold text-navy">{lead.vacancyName}</p>
+      )}
 
       {attemptSlots > 0 && (
         <div onClick={(e) => e.stopPropagation()}>
