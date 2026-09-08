@@ -1,8 +1,9 @@
 // src/components/leads/columns.js
 /**
  * 7 стадий воронки продаж (2026-08-13-leads-funnel-redesign.md). Порядок —
- * порядок колонок слева направо на доске «Заявки» и порядок разрешённых
- * переходов вперёд (нельзя двигать карточку назад по списку).
+ * порядок колонок слева направо на доске «Заявки». Перенос карточки между
+ * стадиями свободный в любую сторону (см. moveLead в LeadsPage.jsx),
+ * гейтов нет.
  */
 export const COLUMNS = [
   {
@@ -123,9 +124,6 @@ export const STAGE_COLOR_SWATCHES = [
  * нельзя: всегда слева, всегда стартовая стадия.
  */
 export const PINNED_FIRST_STAGE = 'new';
-
-/** Терминальные стадии — карточка, попав туда, дальше не двигается. */
-export const TERMINAL_STAGES = ['won', 'lost'];
 
 /** Ключи встроенных стадий — их код знает «в лицо» (спец-рендер, дедлайны, воронка). */
 export const BUILTIN_STAGE_KEYS = COLUMNS.map((c) => c.key);
@@ -270,27 +268,4 @@ export function reorderStageKeys(currentKeys, draggedKey, targetKey) {
 export function columnKeyOf(lead, knownKeys) {
   const keys = knownKeys ?? BUILTIN_STAGE_KEYS;
   return keys.includes(lead.funnelStage) ? lead.funnelStage : 'new';
-}
-
-/**
- * Разрешён ли переход `from → to`. «Вперёд» = целевая колонка правее
- * текущей в порядке доски (`orderedKeys`, см. `resolveColumns`) — прыжки
- * через промежуточные стадии разрешены. Исключения:
- * — 'won'/'lost' терминальны, из них переходов нет;
- * — в 'lost' можно из любой нетерминальной стадии независимо от позиции
- *   колонки «Отказ» (отказать можно всегда);
- * — назад в 'new' (вход воронки) — нельзя, только через «Вернуть в новый лид».
- * @param {string} from
- * @param {string} to
- * @param {string[]} orderedKeys порядок ключей колонок на доске
- * @returns {boolean}
- */
-export function isForwardAllowed(from, to, orderedKeys = COLUMNS.map((c) => c.key)) {
-  if (TERMINAL_STAGES.includes(from)) return false;
-  if (to === PINNED_FIRST_STAGE) return false;
-  if (to === 'lost') return true;
-  const fromIdx = orderedKeys.indexOf(from);
-  const toIdx = orderedKeys.indexOf(to);
-  if (fromIdx < 0 || toIdx < 0) return false;
-  return toIdx > fromIdx;
 }

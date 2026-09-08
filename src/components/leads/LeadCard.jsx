@@ -7,7 +7,7 @@ import { db } from '../../firebase.js';
 import { useAuth } from '../../hooks/useAuth.js';
 import { useCollection } from '../../hooks/useCollection.js';
 import { DropdownMenu } from '../ui/DropdownMenu.jsx';
-import { COLUMNS, isForwardAllowed, resolveAttemptSlots } from './columns.js';
+import { COLUMNS, resolveAttemptSlots } from './columns.js';
 import { isPriorityLead, isTrialDay, contactDueDate, stageDeadline, overdueReasonLabel, LOST_REASON_OPTIONS } from '../../lib/leadFunnel.js';
 import { formatPhone, formatDateTime, formatDateTimeShort, formatRelativeDeadline, formatRelativeDay, formatOverdueBy, formatSource } from '../../lib/format.js';
 import { LEAD_CHECKLIST_ITEMS, CHECKLIST_RED_FLAGS, CHECKLIST_GREEN_FLAGS, checklistCheckedCount, checklistPercent } from '../../lib/leadChecklist.js';
@@ -405,7 +405,6 @@ function UnreachableBlock({ lead, onMark, onReschedule, onDecline, nextAttemptDu
  * @param {(lead: Object) => void} props.onEdit
  * @param {(lead: Object) => void} props.onDecline
  * @param {(lead: Object) => void} props.onDelete полное удаление, только для status=='lead'
- * @param {(lead: Object) => void} props.onScheduleTrial
  * @param {(lead: Object) => void} props.onRescheduleTrial
  * @param {(lead: Object) => void} props.onMarkTouch
  * @param {(lead: Object, stageKey: string) => void} props.onMove
@@ -424,7 +423,6 @@ export function LeadCard({
   onEdit,
   onDecline,
   onDelete,
-  onScheduleTrial,
   onRescheduleTrial,
   onMarkTouch,
   onMove,
@@ -508,20 +506,13 @@ export function LeadCard({
     ...(stage !== 'new' && stage !== 'won' ? [{ label: 'Вернуть в новый лид', danger: true, onClick: () => onResetToNew(lead) }] : []),
   ];
 
-  const orderedKeys = columns.map((c) => c.key);
-  const moveItems = columns.filter(
-    (c) => isForwardAllowed(stage, c.key, orderedKeys),
-  ).map((c) => ({
+  // Перенос в любую колонку, кроме текущей — без гейтов «только вперёд».
+  // Единственная спец-форма — «Отказ»: окно с обязательной причиной
+  // (onDecline). Остальные стадии — голый onMove.
+  const moveItems = columns.filter((c) => c.key !== stage).map((c) => ({
     label: c.label,
     danger: c.key === 'lost',
-    // «Пробный назначен» требует дату/время/учителя, «Отказ» — причину из
-    // фиксированного списка — открываем те же формы, что и «⋮», вместо
-    // голого onMove.
-    onClick: () => {
-      if (c.key === 'trial_scheduled') return onScheduleTrial(lead);
-      if (c.key === 'lost') return onDecline(lead);
-      return onMove(lead, c.key);
-    },
+    onClick: () => (c.key === 'lost' ? onDecline(lead) : onMove(lead, c.key)),
   }));
 
   return (

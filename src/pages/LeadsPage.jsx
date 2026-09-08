@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Moon, Sun } from 'lucide-react';
-import { collection, doc, query, where, orderBy, onSnapshot, updateDoc, setDoc, writeBatch, serverTimestamp, increment, deleteField } from 'firebase/firestore';
+import { collection, doc, query, where, orderBy, onSnapshot, updateDoc, setDoc, writeBatch, serverTimestamp, deleteField } from 'firebase/firestore';
 import { db } from '../firebase.js';
 import { useBranch } from '../hooks/useBranch.js';
 import { useCollection } from '../hooks/useCollection.js';
@@ -20,7 +20,6 @@ import { LeadColumn } from '../components/leads/LeadColumn.jsx';
 import { DropdownMenu } from '../components/ui/DropdownMenu.jsx';
 import {
   columnKeyOf,
-  isForwardAllowed,
   resolveColumns,
   reorderStageKeys,
   resolveAttemptSlots,
@@ -30,13 +29,14 @@ import {
   MAX_STAGES,
   PINNED_FIRST_STAGE,
 } from '../components/leads/columns.js';
-import { advanceStage, nextCallDueAt, firstTouchDueAt, secondTouchDueAt, unreachableCallDueAt } from '../lib/leadFunnel.js';
+import { advanceStage, nextCallDueAt, secondTouchDueAt, unreachableCallDueAt } from '../lib/leadFunnel.js';
 import { playNewLeadChime } from '../lib/notificationSound.js';
 
 /**
  * Заявки — 7-стадийная воронка продаж (2026-08-13-leads-funnel-redesign.md).
- * Перенос между стадиями — только вперёд (drag-n-drop или кнопка «→»),
- * кроме «Отказ» — туда можно с любой нетерминальной стадии. Клик по
+ * Перенос между стадиями — свободный в любую сторону (drag-n-drop или кнопка
+ * «→»), без гейтов и авто-инициализации полей стадии. Единственное
+ * исключение — «Отказ»: открывается окно с обязательной причиной. Клик по
  * карточке — на `/students/:id`.
  */
 export function LeadsPage() {
@@ -122,8 +122,7 @@ export function LeadsPage() {
   // settings/{branchId} (leadStageOverrides / leadStageOrder / customStages /
   // hiddenStages), не в COLUMNS: ключ встроенной стадии неизменен (на него
   // завязаны stageDeadline/markAttempt и спец-рендер), правится только
-  // отображение и состав. Порядок колонок задаёт и правила движения карточек
-  // вперёд — см. isForwardAllowed(orderedKeys).
+  // отображение, состав и порядок колонок слева направо.
   const resolvedColumns = useMemo(() => resolveColumns(branchSettings), [branchSettings]);
   const orderedKeys = useMemo(() => resolvedColumns.map((c) => c.key), [resolvedColumns]);
   const customStages = useMemo(() => customColumns(branchSettings?.customStages), [branchSettings]);
@@ -302,11 +301,11 @@ export function LeadsPage() {
   };
 
   /**
-   * Пишет саму попытку звонка (callLogs + students.callAttempts), дедлайн
-   * следующего звонка (dueDate — вычислен автоматически) и доп. поля стадии
-   * (переход new→calling всегда, calling→lost при всех неудачных попытках).
+   * Пишет саму попытку звонка (callLogs + students.callAttempts) и дедлайн
+   * следующего звонка (dueDate — вычислен автоматически). Стадию лида не
+   * трогает — перевод между колонками только вручную.
    */
-  const commitCallAttempt = async (lead, nextAttempts, result, { dueDate = null, comment = '', stageFields = {} } = {}) => {
+  const commitCallAttempt = async (lead, nextAttempts, result, { dueDate = null } = {}) => {
     try {
       const batch = writeBatch(db);
       batch.set(doc(collection(db, 'callLogs')), {
@@ -320,36 +319,22 @@ export function LeadsPage() {
         userName: staff?.fullName ?? '',
         createdAt: serverTimestamp(),
       });
-      if (comment) {
-        batch.set(doc(collection(db, 'comments')), {
-          entityType: 'lead',
-          entityId: lead.id,
-          text: comment,
-          authorId: user.uid,
-          authorName: staff?.fullName ?? '',
-          createdAt: serverTimestamp(),
-        });
-      }
       // serverTimestamp() внутри элемента массива не поддерживается Firestore —
-      // callAttempts.at/stageHistory.enteredAt используют клиентское время,
-      // updatedAt/lostAt документа ниже — уже верхнеуровневые поля, им можно.
+      // callAttempts.at использует клиентское время, updatedAt документа ниже —
+      // уже верхнеуровневое поле, ему можно.
       batch.update(doc(db, 'students', lead.id), {
         callAttempts: nextAttempts,
         nextCallDueAt: dueDate,
-        ...(comment ? { commentsCount: increment(1) } : {}),
-        ...stageFields,
         updatedAt: serverTimestamp(),
       });
       await batch.commit();
-      if (stageFields.funnelStage === 'lost') showToast(`${lead.fullName}: все попытки дозвона неудачны, лид отмечен как отказ.`);
     } catch {
       showToast('Не удалось отметить попытку.', { type: 'error' });
     }
   };
 
-  // Отметка попытки дозвона (кружочки на карточке). Без модалок — дедлайн
-  // следующего звонка вычисляется и пишется автоматически. new→calling при
-  // первой отметке; все попытки неудачны → авто-«Отказ» (cold_lead).
+  // Отметка попытки дозвона (кружочки на карточке). Без модалок и без смены
+  // стадии — только запись попытки и дедлайн следующего звонка.
   const markAttempt = (lead, result) => {
     const stageKey = columnKeyOf(lead, orderedKeys);
     const slots = attemptSlotsByKey[stageKey] ?? 0;
@@ -358,54 +343,26 @@ export function LeadsPage() {
     const nextAttempts = [...attempts, { result, at: new Date(), expectedBy: lead.nextCallDueAt ?? null }];
 
     // Нестандартные стадии (не new/calling): кружочки — просто счётчик
-    // попыток с историей, без воронки и авто-отказа.
+    // попыток с историей, без дедлайна.
     if (stageKey !== 'new' && stageKey !== 'calling') {
       patch(lead, { callAttempts: nextAttempts });
       return;
     }
-
-    const stageFields = {};
-    if (stageKey === 'new') {
-      stageFields.funnelStage = 'calling';
-      stageFields.stageHistory = [...(lead.stageHistory ?? []), { stage: 'calling', enteredAt: new Date() }];
-    }
-
-    if (result === 'success') {
-      commitCallAttempt(lead, nextAttempts, result, { dueDate: nextCallDueAt(nextAttempts, slots) ?? unreachableCallDueAt(), stageFields });
-      return;
-    }
-
-    const isCold = nextAttempts.length >= slots && nextAttempts.every((a) => a.result === 'fail');
-    if (isCold) {
-      commitCallAttempt(lead, nextAttempts, result, {
-        stageFields: { funnelStage: 'lost', lostReason: 'cold_lead', lostAt: serverTimestamp(), stageHistory: [...(lead.stageHistory ?? []), { stage: 'lost', enteredAt: new Date() }] },
-      });
-      return;
-    }
-    commitCallAttempt(lead, nextAttempts, result, { dueDate: nextCallDueAt(nextAttempts, slots), stageFields });
+    commitCallAttempt(lead, nextAttempts, result, { dueDate: nextCallDueAt(nextAttempts, slots) });
   };
 
-  // Перенос карточки между колонками (стрелка «→» / drag). Никаких модалок и
-  // гейтов — только смена funnelStage (+ авто-инициализация полей стадии).
-  // Единственное исключение — «Отказ»: открывается окно с причиной.
+  // Перенос карточки между колонками (стрелка «→» / drag). Никаких модалок,
+  // гейтов и авто-инициализации полей стадии — только смена funnelStage в
+  // любую сторону. Единственное исключение — «Отказ»: открывается окно с
+  // обязательной причиной.
   const moveLead = (lead, stageKey) => {
     const fromKey = columnKeyOf(lead, orderedKeys);
     if (fromKey === stageKey) return;
-    if (!isForwardAllowed(fromKey, stageKey, orderedKeys)) {
-      showToast('Нельзя вернуть лида на предыдущую стадию.', { type: 'error' });
-      return;
-    }
     if (stageKey === 'lost') {
       setDeclineTarget(lead); // окно с причиной отказа
       return;
     }
-    const extra =
-      stageKey === 'calling'
-        ? { nextCallDueAt: nextCallDueAt(lead.callAttempts ?? [], attemptSlotsByKey.calling ?? 5) }
-        : stageKey === 'closing'
-          ? { closingTouchNumber: 0, nextTouchAt: firstTouchDueAt(lead.trialDate?.toDate?.()), unreachableAttempts: [], closingTouchLog: [] }
-          : {};
-    advanceStage(db, lead, stageKey, extra, user).catch(() => showToast('Не удалось обновить лид.', { type: 'error' }));
+    advanceStage(db, lead, stageKey, {}, user).catch(() => showToast('Не удалось обновить лид.', { type: 'error' }));
   };
 
   // Дожим — 2 касания. Дедлайн следующего касания вычисляется и пишется
@@ -456,7 +413,6 @@ export function LeadsPage() {
     onDecline: (lead) => setDeclineTarget(lead),
     onDelete: (lead) => setDeleteTarget(lead),
     onResetToNew: (lead) => setResetTarget(lead),
-    onScheduleTrial: (lead) => setTrialTarget({ lead, mode: 'schedule' }),
     onRescheduleTrial: (lead) => setTrialTarget({ lead, mode: 'reschedule' }),
     onOpenBooking: (lead) => setBookingTarget(lead),
     // Только «Оплачено» — убирает карточку с доски, студент остаётся в
