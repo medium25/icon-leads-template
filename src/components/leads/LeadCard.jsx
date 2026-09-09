@@ -132,19 +132,11 @@ function LeadChecklistPanel({ leadId, checklist }) {
   );
 }
 
-// Шапка карточки красится цветом текущей колонки (column.color — та же
-// линия, что под заголовком столбца), но бледно: заливка ~7%, линия ~20%.
-// Текст чёрный. Альфы менять тут.
-const HEADER_BG_ALPHA = 0.07;
-const HEADER_BORDER_ALPHA = 0.2;
-const HEADER_TITLE_COLOR = '#0F172A';
-const HEADER_SUBTITLE_COLOR = '#1F2937';
-
-/** hex (#RRGGBB) → rgba(...) с заданной прозрачностью. */
-function tint(hex, alpha) {
+/** hex (#RRGGBB) → строка «R G B» для CSS-переменной --lead-hdr-rgb (см. .lead-hdr в index.css). */
+function hexTriplet(hex) {
   const h = (hex || '').replace('#', '');
-  if (h.length !== 6) return `rgba(139, 148, 163, ${alpha})`;
-  return `rgba(${parseInt(h.slice(0, 2), 16)}, ${parseInt(h.slice(2, 4), 16)}, ${parseInt(h.slice(4, 6), 16)}, ${alpha})`;
+  if (h.length !== 6) return '139 148 163';
+  return `${parseInt(h.slice(0, 2), 16)} ${parseInt(h.slice(2, 4), 16)} ${parseInt(h.slice(4, 6), 16)}`;
 }
 
 /** «Muslima Azizova» → «MA» — инициалы оператора для бейджа-квадрата, как в Telegram. */
@@ -357,25 +349,19 @@ export function LeadCard({
         priority ? 'border-l-4 border-l-orange-soft' : ''
       }`}
     >
-      {/* Шапка карточки — бледная заливка цветом текущей колонки
-          (column.color, та же линия, что под заголовком столбца), текст
-          чёрный. Отрицательные margin/rounded-t растягивают заливку до
-          самых краёв карточки поверх её собственного p-3.5. */}
+      {/* Шапка карточки — в светлой теме бледная заливка цветом текущей
+          колонки (column.color), в тёмной — нейтральный тёмно-серый (см.
+          .lead-hdr в index.css). Отрицательные margin/rounded-t растягивают
+          заливку до самых краёв карточки поверх её собственного p-3.5. */}
       <div
-        className="-mx-3.5 -mt-3.5 flex items-center justify-between gap-2 rounded-t-xl border-b px-3.5 pb-2.5 pt-3.5"
-        style={{
-          backgroundColor: tint(currentColumn?.color, HEADER_BG_ALPHA),
-          borderColor: tint(currentColumn?.color, HEADER_BORDER_ALPHA),
-        }}
+        className="lead-hdr -mx-3.5 -mt-3.5 flex items-center justify-between gap-2 rounded-t-xl border-b px-3.5 pb-2.5 pt-3.5"
+        style={{ '--lead-hdr-rgb': hexTriplet(currentColumn?.color) }}
       >
         <div className="flex min-w-0 items-center gap-1.5">
-          <p className="min-w-0 truncate text-[13px] font-bold leading-tight" style={{ color: HEADER_TITLE_COLOR }}>
-            {lead.fullName}
-          </p>
+          <p className="min-w-0 truncate text-[13px] font-bold leading-tight text-text">{lead.fullName}</p>
           {createdAt && formatOverdueBy(createdAt) && (
             <span
-              className="shrink-0 rounded-badge bg-black/[0.06] px-1.5 py-0.5 text-[10px] font-bold leading-none"
-              style={{ color: HEADER_SUBTITLE_COLOR }}
+              className="shrink-0 rounded-badge bg-black/[0.06] px-1.5 py-0.5 text-[10px] font-bold leading-none text-muted dark:bg-white/[0.09]"
               title={`Лид создан ${formatDateTime(lead.createdAt)}`}
             >
               {formatOverdueBy(createdAt)}
@@ -383,11 +369,7 @@ export function LeadCard({
           )}
         </div>
         <div className="flex min-w-0 shrink items-center gap-1">
-          {lead.vacancyName && (
-            <span className="truncate text-[12px] font-bold" style={{ color: HEADER_SUBTITLE_COLOR }}>
-              {lead.vacancyName}
-            </span>
-          )}
+          {lead.vacancyName && <span className="truncate text-[12px] font-bold text-muted">{lead.vacancyName}</span>}
         </div>
       </div>
 
