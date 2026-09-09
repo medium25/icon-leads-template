@@ -156,17 +156,26 @@ export function customColumns(customStages) {
     }));
 }
 
+// Встроенные стадии-«встречи» — по умолчанию требуют записи на день и время
+// (в шаблоне это «Пробный назначен» / «Пробный проведён» / «Дожим», их
+// часто переименовывают в «Тест», «Общение», «Стажировка» и т.п.). Флаг
+// стадии `appointment` (чекбокс в редакторе колонки) переопределяет
+// значение в любую сторону.
+const APPOINTMENT_DEFAULT_KEYS = ['trial_scheduled', 'trial_completed', 'closing'];
+
 /**
- * Требует ли колонка записи на день и время (настройка стадии
- * `appointment`) — при переводе карточки в такую колонку открывается окно
- * выбора дня и времени (тест / стажировка / общение и т.п.), а дата пишется
- * в `students.appointmentAt` и показывается на карточке. Запись
- * необязательна: окно можно пропустить и назначить позже.
- * @param {{appointment?: boolean}} [column]
+ * Требует ли колонка записи на день и время — при переводе карточки в такую
+ * колонку открывается окно выбора дня и времени, а дата пишется в
+ * `students.appointmentAt` и показывается на карточке. Запись необязательна:
+ * окно можно пропустить и назначить позже. Значение берётся из настройки
+ * стадии `appointment`, а если она не задана — из списка встроенных
+ * стадий-встреч (APPOINTMENT_DEFAULT_KEYS).
+ * @param {{key?: string, appointment?: boolean}} [column]
  * @returns {boolean}
  */
 export function columnRequiresAppointment(column) {
-  return Boolean(column?.appointment);
+  if (column?.appointment != null) return Boolean(column.appointment);
+  return APPOINTMENT_DEFAULT_KEYS.includes(column?.key);
 }
 
 /** Верхний предел кружочков-попыток на карточке (настройка колонки). */

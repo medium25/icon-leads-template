@@ -2,14 +2,14 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { collection, addDoc, doc, updateDoc, increment, query, where, orderBy, serverTimestamp } from 'firebase/firestore';
-import { CheckCircle2, XCircle, Circle, Snowflake, ArrowRight, PhoneOff, MessageSquare, ListChecks, Clock, Users, X, CalendarClock } from 'lucide-react';
+import { CheckCircle2, XCircle, Circle, Snowflake, ArrowRight, MessageSquare, ListChecks, Users, X, CalendarClock } from 'lucide-react';
 import { db } from '../../firebase.js';
 import { useAuth } from '../../hooks/useAuth.js';
 import { useCollection } from '../../hooks/useCollection.js';
 import { DropdownMenu } from '../ui/DropdownMenu.jsx';
-import { COLUMNS, resolveAttemptSlots } from './columns.js';
-import { isPriorityLead, isTrialDay, contactDueDate, stageDeadline, overdueReasonLabel, LOST_REASON_OPTIONS } from '../../lib/leadFunnel.js';
-import { formatPhone, formatDateTime, formatDateTimeShort, formatRelativeDeadline, formatRelativeDay, formatOverdueBy, formatSource } from '../../lib/format.js';
+import { COLUMNS, resolveAttemptSlots, columnRequiresAppointment } from './columns.js';
+import { isPriorityLead, stageDeadline, overdueReasonLabel, LOST_REASON_OPTIONS } from '../../lib/leadFunnel.js';
+import { formatPhone, formatDateTime, formatDateTimeShort, formatRelativeDeadline, formatOverdueBy, formatSource } from '../../lib/format.js';
 import { LEAD_CHECKLIST_ITEMS, CHECKLIST_RED_FLAGS, CHECKLIST_GREEN_FLAGS, checklistCheckedCount, checklistPercent } from '../../lib/leadChecklist.js';
 
 /**
@@ -142,28 +142,7 @@ export function operatorInitials(name) {
   return (first + last).toUpperCase();
 }
 
-/** «RUS TILI» → «Рус», «INGLIZ TILI» → «Англ» — короткая метка курса для карточки. */
-function shortCourseLabel(courseName) {
-  if (!courseName) return '';
-  if (/rus/i.test(courseName)) return 'Рус';
-  if (/ingliz|english/i.test(courseName)) return 'Англ';
-  return courseName;
-}
-
-/** «Рус - Понедельник - 14:00» вместо голой даты — курс/день недели/время пробного. */
-export function trialScheduleLabel(lead) {
-  const trialDateJs = lead.trialDate?.toDate?.();
-  if (!trialDateJs) return 'Дата не указана';
-  const weekday = format(trialDateJs, 'EEEE', { locale: ru });
-  const weekdayCap = weekday.charAt(0).toUpperCase() + weekday.slice(1);
-  const time = format(trialDateJs, 'HH:mm');
-  const course = shortCourseLabel(lead.trialCourseName);
-  return course ? `${course} - ${weekdayCap} - ${time}` : `${weekdayCap} - ${time}`;
-}
-
-const UNREACHABLE_MAX_ATTEMPTS = 3;
-
-/** Триггер-точка попытки — общий для CallAttemptDots и UnreachableBlock. */
+/** Триггер-точка попытки дозвона. */
 function AttemptDot({ ref, toggle, ariaLabel }) {
   return (
     <button
@@ -243,27 +222,6 @@ function CallAttemptDots({ attempts, onMark, nextCallDueAt, slots }) {
   );
 }
 
-/** Ряд из 2 точек — касания в «Дожиме» (см. LeadsPage.markTouch), без результата — просто факт касания. */
-function TouchDots({ closingTouchNumber, nextTouchAt, onMark }) {
-  const count = closingTouchNumber ?? 0;
-  const deadlineLabel = count < 2 && nextTouchAt ? formatRelativeDeadline(nextTouchAt) : null;
-
-  return (
-    <div className="flex items-center gap-2">
-      <div className="flex items-center gap-1.5">
-        {Array.from({ length: 2 }, (_, i) => {
-          if (i < count) return <CheckCircle2 key={i} className="h-4 w-4 text-success" />;
-          if (i === count) {
-            return <AttemptDot key={i} toggle={onMark} ariaLabel={`Касание ${i + 1}: отметить`} />;
-          }
-          return <Circle key={i} className="h-4 w-4 text-border" />;
-        })}
-      </div>
-      {deadlineLabel && <span className="text-[12px] font-bold text-text">{deadlineLabel}</span>}
-    </div>
-  );
-}
-
 /**
  * Бейдж «!» в углу карточки (просрочен дедлайн стадии) — клик показывает,
  * что именно просрочено и до какого момента. Тот же трюк с позиционированием
@@ -304,99 +262,8 @@ function OverdueBadge({ reason, deadline, overdueBy }) {
 }
 
 /**
- * «Не выходит на связь» — необязательный трекер, общий для «Пробный
- * назначен» и «Дожим» (тот же сценарий на обеих стадиях). Кнопка-
- * переключатель; открывшись, показывает до 3 попыток связаться. Каждая
- * попытка — «Перенос» (разрешено один раз за цикл — на пробном сдвигает
- * дату через TrialFormModal, в дожиме сразу просит новый дедлайн касания
- * тут же в onMark) или «Неуспешно»; на 3-й неуспешной подряд открывается
- * «Отказ».
- * @param {Object} lead
- * @param {(result: 'reschedule'|'fail') => Promise<void>|void} onMark
- * @param {() => void} onReschedule доп. действие при «Перенос» — на пробном открывает TrialFormModal, в дожиме no-op (там дедлайн уже спрошен внутри onMark)
- * @param {() => void} onDecline
- * @param {import('firebase/firestore').Timestamp|null} [nextAttemptDueAt] дедлайн следующей попытки — на пробном unreachableNextCallDueAt, в дожиме nextTouchAt
- */
-function UnreachableBlock({ lead, onMark, onReschedule, onDecline, nextAttemptDueAt }) {
-  const attempts = lead.unreachableAttempts ?? [];
-  const [active, setActive] = useState(attempts.length > 0);
-
-  if (!active) {
-    return (
-      <button
-        type="button"
-        onClick={() => setActive(true)}
-        className="self-start text-[12px] text-muted underline decoration-dotted underline-offset-2 hover:text-text"
-      >
-        Не выходит на связь
-      </button>
-    );
-  }
-
-  const rescheduleUsed = attempts.some((a) => a.result === 'reschedule');
-  const failStreak = attempts.filter((a) => a.result === 'fail').length;
-
-  const pick = async (result) => {
-    await onMark(result);
-    if (result === 'reschedule') onReschedule();
-  };
-
-  return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      {Array.from({ length: UNREACHABLE_MAX_ATTEMPTS }, (_, i) => {
-        const attempt = attempts[i];
-        if (attempt) {
-          const Icon = attempt.result === 'reschedule' ? Clock : XCircle;
-          return (
-            <DropdownMenu
-              key={i}
-              items={[{ label: attempt.at ? formatDateTimeShort(attempt.at) : '—', disabled: true }]}
-              trigger={({ ref, toggle }) => (
-                <button
-                  ref={ref}
-                  type="button"
-                  onClick={toggle}
-                  aria-label={`Попытка ${i + 1}: когда отмечена`}
-                  className="flex h-4 w-4 items-center justify-center"
-                >
-                  <Icon className={`h-4 w-4 ${attempt.result === 'reschedule' ? 'text-orange' : 'text-danger'}`} />
-                </button>
-              )}
-            />
-          );
-        }
-        if (i !== attempts.length) return <Circle key={i} className="h-4 w-4 text-border" />;
-        return (
-          <DropdownMenu
-            key={i}
-            items={[
-              ...(rescheduleUsed ? [] : [{ label: 'Перенос', onClick: () => pick('reschedule') }]),
-              { label: 'Неуспешно', danger: true, onClick: () => pick('fail') },
-            ]}
-            trigger={({ ref, toggle }) => <AttemptDot ref={ref} toggle={toggle} ariaLabel={`Попытка ${i + 1}: связаться`} />}
-          />
-        );
-      })}
-      {nextAttemptDueAt && failStreak < UNREACHABLE_MAX_ATTEMPTS && (
-        <span className="text-[11px] text-muted">до {formatDateTimeShort(nextAttemptDueAt)}</span>
-      )}
-      {failStreak >= UNREACHABLE_MAX_ATTEMPTS && (
-        <button
-          type="button"
-          onClick={onDecline}
-          className="rounded-field border border-danger px-2 py-1 text-[12px] font-bold text-danger hover:bg-danger/10"
-        >
-          Отказ
-        </button>
-      )}
-    </div>
-  );
-}
-
-/**
- * Карточка лида на 7-стадийной воронке «Заявки» (2026-08-13-leads-funnel-
- * redesign.md). Перетаскивается мышью (native HTML5 DnD) только вперёд по
- * стадиям — терминальные (won/lost) не draggable вовсе.
+ * Карточка лида на канбан-доске «Заявки». Перетаскивается мышью (native
+ * HTML5 DnD) в любую колонку — терминальные (won/lost) не draggable вовсе.
  * @param {Object} props
  * @param {Object} props.lead документ `students`
  * @param {string} [props.operatorColor] hex-цвет назначенного оператора (`staff.color`)
@@ -405,13 +272,9 @@ function UnreachableBlock({ lead, onMark, onReschedule, onDecline, nextAttemptDu
  * @param {(lead: Object) => void} props.onEdit
  * @param {(lead: Object) => void} props.onDecline
  * @param {(lead: Object) => void} props.onDelete полное удаление, только для status=='lead'
- * @param {(lead: Object) => void} props.onRescheduleTrial
  * @param {(lead: Object) => void} props.onEditAppointment правка дня/времени записи (колонка с `appointment`)
- * @param {(lead: Object) => void} props.onMarkTouch
  * @param {(lead: Object, stageKey: string) => void} props.onMove
  * @param {(lead: Object, result: 'success'|'fail') => void} props.onMarkAttempt
- * @param {(lead: Object, result: 'reschedule'|'fail') => void} props.onMarkUnreachable
- * @param {(lead: Object, checked: boolean) => void} props.onToggleCallReminder
  * @param {(lead: Object) => void} props.onOpenBooking
  * @param {(lead: Object) => void} props.onDismissFromBoard только для won — скрывает с доски, студент остаётся в системе
  * @param {(lead: Object) => void} props.onResetToNew полный сброс воронки за кодом доступа (ResetLeadModal)
@@ -424,13 +287,9 @@ export function LeadCard({
   onEdit,
   onDecline,
   onDelete,
-  onRescheduleTrial,
   onEditAppointment,
-  onMarkTouch,
   onMove,
   onMarkAttempt,
-  onMarkUnreachable,
-  onToggleCallReminder,
   onOpenBooking,
   onDismissFromBoard,
   onResetToNew,
@@ -443,8 +302,8 @@ export function LeadCard({
   // Сколько кружочков-попыток на карточке — настройка текущей колонки.
   const attemptSlots = resolveAttemptSlots(currentColumn ?? { key: stage });
   // Колонка «требует записи» (тест / стажировка / общение) — на карточке
-  // видны день и время, клик открывает окно правки (onEditAppointment).
-  const needsAppointment = Boolean(currentColumn?.appointment);
+  // виден день и время встречи, клик открывает окно правки (onEditAppointment).
+  const needsAppointment = columnRequiresAppointment(currentColumn);
   const operatorLabel = operatorInitials(operatorName);
   const [commentsOpen, setCommentsOpen] = useState(false);
   const hasComments = (lead.commentsCount ?? 0) > 0;
@@ -453,14 +312,6 @@ export function LeadCard({
   const checklistPct = checklistPercent(lead.checklist);
 
   const createdAt = lead.createdAt?.toDate?.();
-  // Риск-бейдж независим от даты (в отличие от overdue) — загорается сразу
-  // после неудачной попытки связаться, даже если до пробного ещё далеко.
-  const unreachableAttempts = lead.unreachableAttempts ?? [];
-  const trialConfirmAtRisk = stage === 'trial_scheduled' && unreachableAttempts[unreachableAttempts.length - 1]?.result === 'fail';
-  // «Не выходит на связь» и «Напомнить через звонок» имеют смысл только в
-  // контактный день (см. contactDueDate в leadFunnel.js — обычно день
-  // пробного, для слота 9:00 — днём раньше) — до этого связываться ещё рано.
-  const trialDay = stage === 'trial_scheduled' && lead.trialDate?.toDate ? isTrialDay(lead.trialDate.toDate()) : false;
   const deadline = stageDeadline(lead);
   const overdue = deadline ? Date.now() > deadline.getTime() : false;
   // priority — метка «лид пришёл вне рабочих часов», актуальна только пока
@@ -496,9 +347,7 @@ export function LeadCard({
   ].filter(Boolean);
 
   const menuItems = [
-    // «Пришёл» перенесён на отдельную страницу «Пробные» (там же создаётся
-    // сам студент, см. TrialLeadCard) — тут остаётся только «Не пришёл».
-    ...(stage === 'trial_scheduled' ? [{ label: 'Не пришёл', onClick: () => onRescheduleTrial(lead) }] : []),
+    ...(needsAppointment ? [{ label: 'День и время', onClick: () => onEditAppointment(lead) }] : []),
     { label: 'Редактировать', onClick: () => onEdit(lead) },
     // Пункт виден на любой нетерминальной стадии — реально удаляет только
     // status=='lead' (правило Firestore), для остальных DeleteLeadModal
@@ -567,7 +416,6 @@ export function LeadCard({
           )}
         </div>
         <div className="flex min-w-0 shrink items-center gap-1">
-          {trialConfirmAtRisk && <PhoneOff className="h-3.5 w-3.5 shrink-0 text-orange" aria-label="Не берёт трубку — подтверждение пробного" />}
           {lead.vacancyName && (
             <span className="truncate text-[12px] font-bold text-navy">{lead.vacancyName}</span>
           )}
@@ -630,51 +478,6 @@ export function LeadCard({
               <p className="whitespace-pre-line text-[12px] font-semibold leading-snug text-text">{item.answer}</p>
             </div>
           ))}
-        </div>
-      )}
-
-      {stage === 'trial_scheduled' && (
-        <div className="flex flex-col gap-2" onClick={(e) => e.stopPropagation()}>
-          <span className="truncate text-[12px] text-muted">{trialScheduleLabel(lead)}</span>
-          {!trialDay && lead.trialDate?.toDate && (
-            <span className="text-[11px] text-muted">
-              Напомнить: {formatRelativeDay(contactDueDate(lead.trialDate.toDate()))}
-            </span>
-          )}
-
-          {trialDay && (
-            <UnreachableBlock
-              lead={lead}
-              onMark={(result) => onMarkUnreachable(lead, result)}
-              onReschedule={() => onRescheduleTrial(lead)}
-              onDecline={() => onDecline(lead)}
-              nextAttemptDueAt={lead.unreachableNextCallDueAt}
-            />
-          )}
-
-          {trialDay && (
-            <label className="flex items-center gap-1.5 text-[12px] text-muted">
-              <input
-                type="checkbox"
-                checked={Boolean(lead.callReminderDone)}
-                onChange={(e) => onToggleCallReminder(lead, e.target.checked)}
-              />
-              {lead.callReminderDone ? 'Напомнили через звонок' : 'Напомнить через звонок'}
-            </label>
-          )}
-        </div>
-      )}
-
-      {stage === 'closing' && (
-        <div className="flex flex-col gap-2" onClick={(e) => e.stopPropagation()}>
-          <TouchDots closingTouchNumber={lead.closingTouchNumber} nextTouchAt={lead.nextTouchAt} onMark={() => onMarkTouch(lead)} />
-          <UnreachableBlock
-            lead={lead}
-            onMark={(result) => onMarkUnreachable(lead, result)}
-            onReschedule={() => {}}
-            onDecline={() => onDecline(lead)}
-            nextAttemptDueAt={lead.nextTouchAt}
-          />
         </div>
       )}
 

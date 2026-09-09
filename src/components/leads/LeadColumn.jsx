@@ -3,7 +3,7 @@ import { isSameMonth, format } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { ChevronDown, ChevronRight, Plus, GripVertical, CheckCircle2, XCircle } from 'lucide-react';
 import { LeadCard } from './LeadCard.jsx';
-import { STAGE_COLOR_SWATCHES, PINNED_FIRST_STAGE, MAX_ATTEMPT_SLOTS, resolveAttemptSlots } from './columns.js';
+import { STAGE_COLOR_SWATCHES, PINNED_FIRST_STAGE, MAX_ATTEMPT_SLOTS, resolveAttemptSlots, columnRequiresAppointment } from './columns.js';
 
 // dataTransfer-тип для перетаскивания самой колонки (порядок стадий) —
 // отдельный от 'text/plain', которым таскаются карточки лидов, чтобы
@@ -37,7 +37,7 @@ function EditableStageTitle({ column, onEdit, onRemove, canRemove, onAdd }) {
   const [label, setLabel] = useState(column.label);
   const [color, setColor] = useState(column.color);
   const [slots, setSlots] = useState(resolveAttemptSlots(column));
-  const [appointment, setAppointment] = useState(Boolean(column.appointment));
+  const [appointment, setAppointment] = useState(columnRequiresAppointment(column));
   const ref = useRef(null);
 
   useEffect(() => {
@@ -45,7 +45,7 @@ function EditableStageTitle({ column, onEdit, onRemove, canRemove, onAdd }) {
     setLabel(column.label);
     setColor(column.color);
     setSlots(resolveAttemptSlots(column));
-    setAppointment(Boolean(column.appointment));
+    setAppointment(columnRequiresAppointment(column));
     const onClickOutside = (e) => {
       if (ref.current && !ref.current.contains(e.target)) setOpen(false);
     };

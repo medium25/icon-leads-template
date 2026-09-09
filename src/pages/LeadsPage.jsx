@@ -14,7 +14,6 @@ import { DeclineLeadModal } from '../components/students/DeclineLeadModal.jsx';
 import { ResetLeadModal } from '../components/leads/ResetLeadModal.jsx';
 import { DismissFromBoardModal } from '../components/leads/DismissFromBoardModal.jsx';
 import { DeleteLeadModal } from '../components/students/DeleteLeadModal.jsx';
-import { TrialFormModal } from '../components/leads/TrialFormModal.jsx';
 import { AppointmentModal } from '../components/leads/AppointmentModal.jsx';
 import { GroupBookingModal } from '../components/leads/GroupBookingModal.jsx';
 import { LeadColumn } from '../components/leads/LeadColumn.jsx';
@@ -31,7 +30,7 @@ import {
   MAX_STAGES,
   PINNED_FIRST_STAGE,
 } from '../components/leads/columns.js';
-import { advanceStage, nextCallDueAt, secondTouchDueAt, unreachableCallDueAt } from '../lib/leadFunnel.js';
+import { advanceStage, nextCallDueAt } from '../lib/leadFunnel.js';
 import { playNewLeadChime } from '../lib/notificationSound.js';
 
 /**
@@ -271,7 +270,6 @@ export function LeadsPage() {
   const [formLead, setFormLead] = useState(null);
   const [declineTarget, setDeclineTarget] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
-  const [trialTarget, setTrialTarget] = useState(null); // { lead, mode: 'schedule'|'reschedule' }
   const [appointmentTarget, setAppointmentTarget] = useState(null); // { lead, stageKey, move }
   const [bookingTarget, setBookingTarget] = useState(null);
   const [resetTarget, setResetTarget] = useState(null);
@@ -372,41 +370,6 @@ export function LeadsPage() {
     advanceStage(db, lead, stageKey, {}, user).catch(() => showToast('Не удалось обновить лид.', { type: 'error' }));
   };
 
-  // Дожим — 2 касания. Дедлайн следующего касания вычисляется и пишется
-  // автоматически, без модалки.
-  const markTouch = (lead) => {
-    const nextNumber = (lead.closingTouchNumber ?? 0) + 1;
-    const isFinal = nextNumber >= 2;
-    const nextLog = [...(lead.closingTouchLog ?? []), { at: new Date(), expectedBy: lead.nextTouchAt ?? null }];
-    patch(
-      lead,
-      {
-        closingTouchNumber: nextNumber,
-        nextTouchAt: isFinal ? null : secondTouchDueAt(lead.trialDate?.toDate?.()),
-        unreachableAttempts: [],
-        closingTouchLog: nextLog,
-      },
-      `Касание ${nextNumber} отмечено.`,
-    );
-  };
-
-  // «Не выходит на связь» — до 3 попыток на «Пробном» и в «Дожиме». Дедлайн
-  // следующего звонка/касания вычисляется автоматически, без модалки.
-  const markUnreachable = (lead, result) => {
-    const expectedBy = (lead.funnelStage === 'closing' ? lead.nextTouchAt : lead.unreachableNextCallDueAt) ?? null;
-    const attempts = [...(lead.unreachableAttempts ?? []), { result, at: new Date(), expectedBy }];
-    const attemptsExhausted = attempts.length >= 3;
-
-    if (lead.funnelStage === 'closing') {
-      patch(lead, { unreachableAttempts: attempts, nextTouchAt: attemptsExhausted ? null : unreachableCallDueAt() });
-      return;
-    }
-    patch(lead, {
-      unreachableAttempts: attempts,
-      unreachableNextCallDueAt: result === 'reschedule' || attemptsExhausted ? null : unreachableCallDueAt(),
-    });
-  };
-
   const openAddForm = () => setFormLead({});
 
   const handleCreated = () => {
@@ -420,18 +383,14 @@ export function LeadsPage() {
     onDecline: (lead) => setDeclineTarget(lead),
     onDelete: (lead) => setDeleteTarget(lead),
     onResetToNew: (lead) => setResetTarget(lead),
-    onRescheduleTrial: (lead) => setTrialTarget({ lead, mode: 'reschedule' }),
     onEditAppointment: (lead) => setAppointmentTarget({ lead, stageKey: columnKeyOf(lead, orderedKeys), move: false }),
     onOpenBooking: (lead) => setBookingTarget(lead),
     // Только «Оплачено» — убирает карточку с доски, студент остаётся в
     // системе (просто не рендерится больше в этом списке, см. leads выше).
     // По паролю (см. DismissFromBoardModal), чтобы не улетало случайным кликом.
     onDismissFromBoard: (lead) => setDismissTarget(lead),
-    onMarkTouch: markTouch,
     onMove: moveLead,
     onMarkAttempt: markAttempt,
-    onMarkUnreachable: markUnreachable,
-    onToggleCallReminder: (lead, checked) => patch(lead, { callReminderDone: checked }),
   };
 
   return (
@@ -519,7 +478,6 @@ export function LeadsPage() {
       <DeleteLeadModal lead={deleteTarget} onClose={() => setDeleteTarget(null)} />
       <ResetLeadModal lead={resetTarget} onClose={() => setResetTarget(null)} />
       <DismissFromBoardModal lead={dismissTarget} onClose={() => setDismissTarget(null)} />
-      <TrialFormModal target={trialTarget} timeSlots={branchSettings?.trialTimeSlots} onClose={() => setTrialTarget(null)} />
       <AppointmentModal target={appointmentTarget} onClose={() => setAppointmentTarget(null)} />
       <GroupBookingModal lead={bookingTarget} allLeads={allLeads} onClose={() => setBookingTarget(null)} />
     </div>
