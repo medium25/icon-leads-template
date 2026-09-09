@@ -132,7 +132,10 @@ function LeadChecklistPanel({ leadId, checklist }) {
   );
 }
 
-/** hex (#RRGGBB) → rgba(...) с заданной прозрачностью — для заливки шапки карточки цветом стадии. */
+/** Единый цвет шапки всех карточек лида (чёрный — заливка/линия полупрозрачные). Поменяй тут — поменяется везде. */
+const CARD_HEADER_COLOR = '#000000';
+
+/** hex (#RRGGBB) → rgba(...) с заданной прозрачностью — для заливки шапки карточки. */
 function tint(hex, alpha) {
   const h = (hex || '').replace('#', '');
   if (h.length !== 6) return `rgba(139, 148, 163, ${alpha})`;
@@ -349,13 +352,13 @@ export function LeadCard({
         priority ? 'border-l-4 border-l-orange-soft' : ''
       }`}
     >
-      {/* Шапка карточки покрашена цветом текущей колонки (column.color —
-          та же линия, что под заголовком столбца), без завязки на состояние
-          лида. Отрицательные margin/rounded-t повторяют скругление карточки,
-          растягивая заливку до самых краёв поверх её собственного p-3.5. */}
+      {/* Шапка карточки — один постоянный цвет (фиолетовый), не зависит ни
+          от колонки, ни от состояния лида. Отрицательные margin/rounded-t
+          повторяют скругление карточки, растягивая заливку до самых краёв
+          поверх её собственного p-3.5. */}
       <div
         className="-mx-3.5 -mt-3.5 flex items-center justify-between gap-2 rounded-t-xl border-b px-3.5 pb-2.5 pt-3.5"
-        style={{ backgroundColor: tint(currentColumn?.color, 0.12), borderColor: tint(currentColumn?.color, 0.34) }}
+        style={{ backgroundColor: tint(CARD_HEADER_COLOR, 0.12), borderColor: tint(CARD_HEADER_COLOR, 0.34) }}
       >
         <div className="flex min-w-0 items-center gap-1.5">
           <p className="min-w-0 truncate text-[13px] font-bold leading-tight text-text">{lead.fullName}</p>
