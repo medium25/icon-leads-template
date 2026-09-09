@@ -132,8 +132,15 @@ function LeadChecklistPanel({ leadId, checklist }) {
   );
 }
 
-/** Единый цвет шапки всех карточек лида — сплошная заливка, текст белый. Поменяй тут — поменяется везде. */
-const CARD_HEADER_COLOR = '#000000';
+// Единый цвет шапки всех карточек лида (кобальт) — светлая заливка + линия,
+// текст тёмный того же тона. Не зависит от колонки и состояния. Поменять
+// весь набор тут — поменяется на всех карточках.
+const CARD_HEADER = {
+  bg: '#CDD8F6',
+  border: '#9FB4EE',
+  title: '#1E3A8A',
+  subtitle: '#1E40AF',
+};
 
 /** «Muslima Azizova» → «MA» — инициалы оператора для бейджа-квадрата, как в Telegram. */
 export function operatorInitials(name) {
@@ -345,20 +352,24 @@ export function LeadCard({
         priority ? 'border-l-4 border-l-orange-soft' : ''
       }`}
     >
-      {/* Шапка карточки — сплошная заливка одним цветом (CARD_HEADER_COLOR),
-          текст белый. Не зависит ни от колонки, ни от состояния лида.
+      {/* Шапка карточки — светлая заливка одним цветом (CARD_HEADER), текст
+          тёмный того же тона. Не зависит ни от колонки, ни от состояния.
           Отрицательные margin/rounded-t растягивают заливку до самых краёв
           карточки поверх её собственного p-3.5. */}
       <div
-        className="-mx-3.5 -mt-3.5 flex items-center justify-between gap-2 rounded-t-xl px-3.5 pb-2.5 pt-3.5"
-        style={{ backgroundColor: CARD_HEADER_COLOR }}
+        className="-mx-3.5 -mt-3.5 flex items-center justify-between gap-2 rounded-t-xl border-b px-3.5 pb-2.5 pt-3.5"
+        style={{ backgroundColor: CARD_HEADER.bg, borderColor: CARD_HEADER.border }}
       >
         <div className="flex min-w-0 items-center gap-1.5">
-          <p className="min-w-0 truncate text-[13px] font-bold leading-tight text-white">{lead.fullName}</p>
+          <p className="min-w-0 truncate text-[13px] font-bold leading-tight" style={{ color: CARD_HEADER.title }}>
+            {lead.fullName}
+          </p>
         </div>
         <div className="flex min-w-0 shrink items-center gap-1">
           {lead.vacancyName && (
-            <span className="truncate text-[12px] font-bold text-white/75">{lead.vacancyName}</span>
+            <span className="truncate text-[12px] font-bold" style={{ color: CARD_HEADER.subtitle }}>
+              {lead.vacancyName}
+            </span>
           )}
         </div>
       </div>
