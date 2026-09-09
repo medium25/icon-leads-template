@@ -280,11 +280,23 @@ export function LeadsPage() {
       const key = columnKeyOf(lead, orderedKeys);
       (map[key] ??= []).push(lead);
     }
-    // «Пробный назначен» — ближайший пробный первым, «Дозвон» — ближайший
-    // дедлайн следующего звонка первым, а не по дате создания лида (порядок
-    // остальных колонок), чтобы срочное было видно сразу.
-    map.trial_scheduled?.sort((a, b) => (a.trialDate?.seconds ?? Infinity) - (b.trialDate?.seconds ?? Infinity));
-    map.calling?.sort((a, b) => (a.nextCallDueAt?.seconds ?? Infinity) - (b.nextCallDueAt?.seconds ?? Infinity));
+    // Порядок карточек внутри колонки:
+    // — колонки-встречи (appointment: тест/общение/стажировка) — по
+    //   ближайшему дедлайну записи (appointmentAt), срочное сверху;
+    // — остальные колонки (дозвон/перезвон/...) — по дате создания лида,
+    //   старые сверху: чем дольше лид висит необработанным, тем выше;
+    // — «Новый лид» (вход воронки) и «Оплачено»/«Отказ» (группировка по
+    //   месяцам) не трогаем — там свежие сверху.
+    const skipSort = new Set([PINNED_FIRST_STAGE, 'won', 'lost']);
+    for (const col of resolvedColumns) {
+      const arr = map[col.key];
+      if (!arr || skipSort.has(col.key)) continue;
+      if (columnRequiresAppointment(col)) {
+        arr.sort((a, b) => (a.appointmentAt?.seconds ?? Infinity) - (b.appointmentAt?.seconds ?? Infinity));
+      } else {
+        arr.sort((a, b) => (a.createdAt?.seconds ?? Infinity) - (b.createdAt?.seconds ?? Infinity));
+      }
+    }
     return map;
   }, [leads, resolvedColumns, orderedKeys]);
 
