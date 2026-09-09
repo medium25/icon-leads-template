@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { collection, addDoc, doc, updateDoc, increment, query, where, orderBy, serverTimestamp } from 'firebase/firestore';
-import { CheckCircle2, XCircle, Circle, Snowflake, ArrowRight, MessageSquare, ListChecks, Users, X, CalendarClock } from 'lucide-react';
+import { CheckCircle2, XCircle, Circle, Snowflake, ArrowRight, MessageSquare, ListChecks, X, CalendarClock } from 'lucide-react';
 import { db } from '../../firebase.js';
 import { useAuth } from '../../hooks/useAuth.js';
 import { useCollection } from '../../hooks/useCollection.js';
@@ -275,7 +275,6 @@ function OverdueBadge({ reason, deadline, overdueBy }) {
  * @param {(lead: Object) => void} props.onEditAppointment правка дня/времени записи (колонка с `appointment`)
  * @param {(lead: Object, stageKey: string) => void} props.onMove
  * @param {(lead: Object, result: 'success'|'fail') => void} props.onMarkAttempt
- * @param {(lead: Object) => void} props.onOpenBooking
  * @param {(lead: Object) => void} props.onDismissFromBoard только для won — скрывает с доски, студент остаётся в системе
  * @param {(lead: Object) => void} props.onResetToNew полный сброс воронки за кодом доступа (ResetLeadModal)
  */
@@ -290,7 +289,6 @@ export function LeadCard({
   onEditAppointment,
   onMove,
   onMarkAttempt,
-  onOpenBooking,
   onDismissFromBoard,
   onResetToNew,
   columns = COLUMNS,
@@ -543,16 +541,6 @@ export function LeadCard({
             >
               <MessageSquare className="h-4 w-4" fill={hasComments ? 'currentColor' : 'none'} fillOpacity={hasComments ? 0.15 : 1} />
             </button>
-            {!isTerminal && (
-              <button
-                type="button"
-                onClick={() => onOpenBooking(lead)}
-                aria-label="Свободные места в группе"
-                className="flex h-8 w-8 items-center justify-center rounded-full text-muted hover:bg-surface-alt"
-              >
-                <Users className="h-4 w-4" />
-              </button>
-            )}
             {!isTerminal && moveItems.length > 0 && <DropdownMenu items={moveItems} icon={ArrowRight} ariaLabel="Перенести в колонку" />}
             <DropdownMenu items={menuItems} />
           </div>

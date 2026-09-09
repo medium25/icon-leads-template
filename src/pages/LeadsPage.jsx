@@ -15,7 +15,6 @@ import { ResetLeadModal } from '../components/leads/ResetLeadModal.jsx';
 import { DismissFromBoardModal } from '../components/leads/DismissFromBoardModal.jsx';
 import { DeleteLeadModal } from '../components/students/DeleteLeadModal.jsx';
 import { AppointmentModal } from '../components/leads/AppointmentModal.jsx';
-import { GroupBookingModal } from '../components/leads/GroupBookingModal.jsx';
 import { LeadColumn } from '../components/leads/LeadColumn.jsx';
 import { DropdownMenu } from '../components/ui/DropdownMenu.jsx';
 import {
@@ -271,7 +270,6 @@ export function LeadsPage() {
   const [declineTarget, setDeclineTarget] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [appointmentTarget, setAppointmentTarget] = useState(null); // { lead, stageKey, move }
-  const [bookingTarget, setBookingTarget] = useState(null);
   const [resetTarget, setResetTarget] = useState(null);
   const [dismissTarget, setDismissTarget] = useState(null);
 
@@ -384,7 +382,6 @@ export function LeadsPage() {
     onDelete: (lead) => setDeleteTarget(lead),
     onResetToNew: (lead) => setResetTarget(lead),
     onEditAppointment: (lead) => setAppointmentTarget({ lead, stageKey: columnKeyOf(lead, orderedKeys), move: false }),
-    onOpenBooking: (lead) => setBookingTarget(lead),
     // Только «Оплачено» — убирает карточку с доски, студент остаётся в
     // системе (просто не рендерится больше в этом списке, см. leads выше).
     // По паролю (см. DismissFromBoardModal), чтобы не улетало случайным кликом.
@@ -479,7 +476,6 @@ export function LeadsPage() {
       <ResetLeadModal lead={resetTarget} onClose={() => setResetTarget(null)} />
       <DismissFromBoardModal lead={dismissTarget} onClose={() => setDismissTarget(null)} />
       <AppointmentModal target={appointmentTarget} onClose={() => setAppointmentTarget(null)} />
-      <GroupBookingModal lead={bookingTarget} allLeads={allLeads} onClose={() => setBookingTarget(null)} />
     </div>
   );
 }
