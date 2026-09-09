@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { isToday, isTomorrow, isSameMonth, format } from 'date-fns';
+import { isSameMonth, format } from 'date-fns';
 import { ru } from 'date-fns/locale';
-import { ChevronDown, ChevronRight, Plus, GripVertical, CheckCircle2, XCircle, AlertTriangle, Sun, Clock, Calendar } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, GripVertical, CheckCircle2, XCircle } from 'lucide-react';
 import { LeadCard } from './LeadCard.jsx';
 import { STAGE_COLOR_SWATCHES, PINNED_FIRST_STAGE, MAX_ATTEMPT_SLOTS, resolveAttemptSlots } from './columns.js';
 
@@ -9,17 +9,15 @@ import { STAGE_COLOR_SWATCHES, PINNED_FIRST_STAGE, MAX_ATTEMPT_SLOTS, resolveAtt
 // отдельный от 'text/plain', которым таскаются карточки лидов, чтобы
 // drop-зоны не путали одно с другим.
 const STAGE_DND_TYPE = 'application/x-stage-key';
-import { stageDeadline, LOST_REASON_OPTIONS } from '../../lib/leadFunnel.js';
+import { LOST_REASON_OPTIONS } from '../../lib/leadFunnel.js';
 import { pluralize } from '../../lib/format.js';
 
-// Цвет круга-иконки в свёрнутой LeadGroup (см. closedIconClassName) — общие
-// для won/lost («Оплачено»/«Отказ» по месяцам) и «Пробный назначен» по дню.
-// Малиновый (не стандартный danger-токен) — тот же оттенок, что уже
-// используется на LeadCard для просрочки, сознательно другой цвет.
+// Цвет круга-иконки в свёрнутой LeadGroup (см. closedIconClassName) —
+// «Оплачено»/«Отказ» по месяцам. Малиновый (не стандартный danger-токен) —
+// тот же оттенок, что уже используется на LeadCard для просрочки,
+// сознательно другой цвет.
 const TONE_SUCCESS = 'bg-success/15 text-success';
 const TONE_DANGER = 'bg-[rgba(190,18,60,0.13)] text-[#BE123C] dark:bg-[rgba(253,164,175,0.15)] dark:text-[#FDA4AF]';
-const TONE_ORANGE = 'bg-orange/15 text-orange';
-const TONE_NAVY = 'bg-navy/15 text-navy';
 const TONE_MUTED = 'bg-border text-muted';
 
 /**
@@ -197,16 +195,13 @@ function EditableStageTitle({ column, onEdit, onRemove, canRemove, onAdd }) {
 }
 
 /**
- * Свёрнутая/развёрнутая папка карточек внутри колонки — «Пробный
- * назначен» (см. groupLeadsByTrialDay), «Оплачено»/«Отказ» по месяцам
- * (см. groupLeadsByMonth) и внутри «Отказ» ещё по причине (см.
- * groupLeadsByReason). Рендерится всегда, даже пустой — «Завтра» без
- * карточек всё равно должна быть видна, а не пропадать из списка;
- * `children` (если задан) заменяет автоматический рендер карточек —
- * нужно для вложенных групп причин внутри группы месяца.
+ * Свёрнутая/развёрнутая папка карточек внутри колонки — «Оплачено»/«Отказ»
+ * по месяцам (см. groupLeadsByMonth) и внутри «Отказ» ещё по причине (см.
+ * groupLeadsByReason). `children` (если задан) заменяет автоматический
+ * рендер карточек — нужно для вложенных групп причин внутри группы месяца.
  *
  * `closedIcon`/`closedIconClassName`/`closedCaption` — верхний уровень
- * «Оплачено»/«Отказ» по месяцам и «Пробный назначен» по дню (см. вызовы в
+ * «Оплачено»/«Отказ» по месяцам (см. вызовы в
  * LeadColumn ниже): вместо тонкой строки-заголовка — крупная иконка в
  * цветном круге, название и подпись с числом, сразу понятно смысл группы
  * без открытия. Вложенные группы причин внутри «Отказ» эти пропсы не
@@ -310,31 +305,6 @@ function LeadGroup({ title, subtitle, leads, operatorByUid, cardActions, default
       )}
     </div>
   );
-}
-
-/**
- * Раскладывает лидов «Пробный назначен» по дню пробного — Сегодня/Завтра/
- * Другой день (включая уже прошедшие и те, что дальше завтра). Порядок
- * внутри групп лиды приносят уже отсортированным (LeadsPage сортирует весь
- * список по trialDate раньше).
- * @param {Array<Object>} leads
- * @returns {{today: Array, tomorrow: Array, other: Array}}
- */
-export function groupLeadsByTrialDay(leads) {
-  const groups = { overdue: [], today: [], tomorrow: [], other: [] };
-  const now = Date.now();
-  for (const lead of leads) {
-    const d = lead.trialDate?.toDate?.();
-    const deadline = stageDeadline(lead);
-    if (deadline && now > deadline.getTime() && !(d && isToday(d))) {
-      groups.overdue.push(lead);
-      continue;
-    }
-    if (d && isToday(d)) groups.today.push(lead);
-    else if (d && isTomorrow(d)) groups.tomorrow.push(lead);
-    else groups.other.push(lead);
-  }
-  return groups;
 }
 
 /** Первая непустая Firestore-дата лида среди перечисленных полей, как JS Date (или null). */
@@ -441,10 +411,8 @@ export function LeadColumn({ column, leads, operatorByUid, onAdd, onDropLead, on
   const [stageDragOver, setStageDragOver] = useState(false);
   // Первую колонку (вход воронки) не двигаем и на её место не роняем.
   const canReorder = Boolean(onReorderStage) && column.key !== PINNED_FIRST_STAGE;
-  const isTrialScheduled = column.key === 'trial_scheduled';
   const isWon = column.key === 'won';
   const isLost = column.key === 'lost';
-  const groups = useMemo(() => (isTrialScheduled ? groupLeadsByTrialDay(leads) : null), [isTrialScheduled, leads]);
   // «Оплачено»/«Отказ» сгруппированы по месяцу вместо жёсткого фильтра «только
   // текущий месяц», который был раньше (см. комментарий у useMemo(leads) в
   // LeadsPage.jsx) — dateFields задаёт приоритет полей даты для каждой стадии.
@@ -546,51 +514,6 @@ export function LeadColumn({ column, leads, operatorByUid, onAdd, onDropLead, on
       >
         {leads.length === 0 ? (
           <p className="py-4 text-center text-[14px] text-muted">Пусто</p>
-        ) : groups ? (
-          <>
-            {groups.overdue.length > 0 && (
-              <LeadGroup
-                title="Просроченные"
-                leads={groups.overdue}
-                operatorByUid={operatorByUid}
-                cardActions={cardActions}
-                defaultOpen={false}
-                closedIcon={AlertTriangle}
-                closedIconClassName={TONE_DANGER}
-                closedCaption={`${groups.overdue.length} ${pluralize(groups.overdue.length, ['лид', 'лида', 'лидов'])}`}
-              />
-            )}
-            <LeadGroup
-              title="Сегодня"
-              leads={groups.today}
-              operatorByUid={operatorByUid}
-              cardActions={cardActions}
-              defaultOpen={false}
-              closedIcon={Sun}
-              closedIconClassName={TONE_ORANGE}
-              closedCaption={`${groups.today.length} ${pluralize(groups.today.length, ['лид', 'лида', 'лидов'])}`}
-            />
-            <LeadGroup
-              title="Следующий день"
-              leads={groups.tomorrow}
-              operatorByUid={operatorByUid}
-              cardActions={cardActions}
-              defaultOpen={false}
-              closedIcon={Clock}
-              closedIconClassName={TONE_NAVY}
-              closedCaption={`${groups.tomorrow.length} ${pluralize(groups.tomorrow.length, ['лид', 'лида', 'лидов'])}`}
-            />
-            <LeadGroup
-              title="Другой день"
-              leads={groups.other}
-              operatorByUid={operatorByUid}
-              cardActions={cardActions}
-              defaultOpen={false}
-              closedIcon={Calendar}
-              closedIconClassName={TONE_MUTED}
-              closedCaption={`${groups.other.length} ${pluralize(groups.other.length, ['лид', 'лида', 'лидов'])}`}
-            />
-          </>
         ) : monthGroups ? (
           <>
             {monthGroups.map((month) =>
