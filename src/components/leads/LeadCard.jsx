@@ -132,15 +132,8 @@ function LeadChecklistPanel({ leadId, checklist }) {
   );
 }
 
-/** Единый цвет шапки всех карточек лида (чёрный — заливка/линия полупрозрачные). Поменяй тут — поменяется везде. */
+/** Единый цвет шапки всех карточек лида — сплошная заливка, текст белый. Поменяй тут — поменяется везде. */
 const CARD_HEADER_COLOR = '#000000';
-
-/** hex (#RRGGBB) → rgba(...) с заданной прозрачностью — для заливки шапки карточки. */
-function tint(hex, alpha) {
-  const h = (hex || '').replace('#', '');
-  if (h.length !== 6) return `rgba(139, 148, 163, ${alpha})`;
-  return `rgba(${parseInt(h.slice(0, 2), 16)}, ${parseInt(h.slice(2, 4), 16)}, ${parseInt(h.slice(4, 6), 16)}, ${alpha})`;
-}
 
 /** «Muslima Azizova» → «MA» — инициалы оператора для бейджа-квадрата, как в Telegram. */
 export function operatorInitials(name) {
@@ -352,20 +345,20 @@ export function LeadCard({
         priority ? 'border-l-4 border-l-orange-soft' : ''
       }`}
     >
-      {/* Шапка карточки — один постоянный цвет (фиолетовый), не зависит ни
-          от колонки, ни от состояния лида. Отрицательные margin/rounded-t
-          повторяют скругление карточки, растягивая заливку до самых краёв
-          поверх её собственного p-3.5. */}
+      {/* Шапка карточки — сплошная заливка одним цветом (CARD_HEADER_COLOR),
+          текст белый. Не зависит ни от колонки, ни от состояния лида.
+          Отрицательные margin/rounded-t растягивают заливку до самых краёв
+          карточки поверх её собственного p-3.5. */}
       <div
-        className="-mx-3.5 -mt-3.5 flex items-center justify-between gap-2 rounded-t-xl border-b px-3.5 pb-2.5 pt-3.5"
-        style={{ backgroundColor: tint(CARD_HEADER_COLOR, 0.12), borderColor: tint(CARD_HEADER_COLOR, 0.34) }}
+        className="-mx-3.5 -mt-3.5 flex items-center justify-between gap-2 rounded-t-xl px-3.5 pb-2.5 pt-3.5"
+        style={{ backgroundColor: CARD_HEADER_COLOR }}
       >
         <div className="flex min-w-0 items-center gap-1.5">
-          <p className="min-w-0 truncate text-[13px] font-bold leading-tight text-text">{lead.fullName}</p>
+          <p className="min-w-0 truncate text-[13px] font-bold leading-tight text-white">{lead.fullName}</p>
         </div>
         <div className="flex min-w-0 shrink items-center gap-1">
           {lead.vacancyName && (
-            <span className="truncate text-[12px] font-bold text-navy">{lead.vacancyName}</span>
+            <span className="truncate text-[12px] font-bold text-white/75">{lead.vacancyName}</span>
           )}
         </div>
       </div>
