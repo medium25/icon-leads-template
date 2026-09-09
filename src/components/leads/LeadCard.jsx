@@ -385,32 +385,19 @@ export function LeadCard({
         priority && !overdue ? 'border-l-4 border-l-orange-soft' : ''
       }`}
     >
-      {/* И просрочка, и «В норме» красят только шапку (заливка + линия под
-          ней) — не всю карточку, как раньше (border-danger/border-success
-          ring на корне). Отрицательные margin/rounded-t повторяют
+      {/* Шапка карточки — один постоянный цвет (синий), не зависит от
+          состояния лида. Отрицательные margin/rounded-t повторяют
           скругление карточки, растягивая заливку до самых краёв поверх её
           собственного p-3.5. */}
-      <div
-        className={`flex items-center justify-between gap-2 border-b pb-2.5 ${
-          overdue
-            ? '-mx-3.5 -mt-3.5 rounded-t-xl border-[rgba(225,29,72,0.26)] bg-[rgba(225,29,72,0.09)] px-3.5 pt-3.5 dark:border-[rgba(251,113,133,0.30)] dark:bg-[rgba(251,113,133,0.13)]'
-            : !isTerminal
-              ? '-mx-3.5 -mt-3.5 rounded-t-xl border-success/30 bg-success/10 px-3.5 pt-3.5'
-              : 'border-border'
-        }`}
-      >
+      <div className="-mx-3.5 -mt-3.5 flex items-center justify-between gap-2 rounded-t-xl border-b border-[rgba(47,111,228,0.24)] bg-[rgba(47,111,228,0.09)] px-3.5 pb-2.5 pt-3.5 dark:border-[rgba(96,150,240,0.30)] dark:bg-[rgba(96,150,240,0.13)]">
         <div className="flex min-w-0 items-center gap-1.5">
           <p className="min-w-0 truncate text-[13px] font-bold leading-tight text-text">{lead.fullName}</p>
-          {overdue ? (
+          {overdue && (
             <OverdueBadge
               reason={overdueReasonLabel(lead)}
               deadline={deadline ? format(deadline, 'dd.MM.yyyy HH:mm', { locale: ru }) : null}
               overdueBy={deadline ? formatOverdueBy(deadline) : null}
             />
-          ) : (
-            !isTerminal && (
-              <span className="shrink-0 rounded-badge bg-success/10 px-1.5 py-0.5 text-[10px] font-bold text-success">В норме</span>
-            )
           )}
         </div>
         <div className="flex min-w-0 shrink items-center gap-1">
