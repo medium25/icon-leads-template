@@ -97,14 +97,14 @@ body {
   cursor: pointer;
 }
 
-/* Шапка карточки лида. Светлая тема — бледная заливка цветом колонки
-   (--lead-hdr-rgb задаётся инлайн из column.color). Тёмная тема —
-   нейтральный тёмно-серый, без цветного оттенка. */
+/* Шапка карточки лида — бледная заливка цветом колонки (--lead-hdr-rgb
+   задаётся инлайн из column.color). В тёмной теме тот же цвет, но альфа
+   выше — тёмная поверхность «съедает» цвет. */
 .lead-hdr {
   background-color: rgb(var(--lead-hdr-rgb, 139 148 163) / 0.07);
   border-color: rgb(var(--lead-hdr-rgb, 139 148 163) / 0.2);
 }
 .dark .lead-hdr {
-  background-color: rgb(255 255 255 / 0.045);
-  border-color: rgb(255 255 255 / 0.09);
+  background-color: rgb(var(--lead-hdr-rgb, 154 163 178) / 0.16);
+  border-color: rgb(var(--lead-hdr-rgb, 154 163 178) / 0.32);
 }
