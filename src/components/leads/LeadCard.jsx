@@ -7,7 +7,7 @@ import { useCollection } from '../../hooks/useCollection.js';
 import { DropdownMenu } from '../ui/DropdownMenu.jsx';
 import { COLUMNS, resolveAttemptSlots, columnRequiresAppointment } from './columns.js';
 import { isPriorityLead, LOST_REASON_OPTIONS } from '../../lib/leadFunnel.js';
-import { formatPhone, formatDateTime, formatDateTimeShort, formatRelativeDeadline, formatSource } from '../../lib/format.js';
+import { formatPhone, formatDateTime, formatDateTimeShort, formatRelativeDeadline, formatOverdueBy, formatSource } from '../../lib/format.js';
 import { LEAD_CHECKLIST_ITEMS, CHECKLIST_RED_FLAGS, CHECKLIST_GREEN_FLAGS, checklistCheckedCount, checklistPercent } from '../../lib/leadChecklist.js';
 
 /**
@@ -372,6 +372,15 @@ export function LeadCard({
           <p className="min-w-0 truncate text-[13px] font-bold leading-tight" style={{ color: HEADER_TITLE_COLOR }}>
             {lead.fullName}
           </p>
+          {createdAt && formatOverdueBy(createdAt) && (
+            <span
+              className="shrink-0 rounded-badge bg-black/[0.06] px-1.5 py-0.5 text-[10px] font-bold leading-none"
+              style={{ color: HEADER_SUBTITLE_COLOR }}
+              title={`Лид создан ${formatDateTime(lead.createdAt)}`}
+            >
+              {formatOverdueBy(createdAt)}
+            </span>
+          )}
         </div>
         <div className="flex min-w-0 shrink items-center gap-1">
           {lead.vacancyName && (
