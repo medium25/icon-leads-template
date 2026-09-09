@@ -138,8 +138,8 @@ function LeadChecklistPanel({ leadId, checklist }) {
 const CARD_HEADER = {
   bg: '#CDD8F6',
   border: '#9FB4EE',
-  title: '#1E3A8A',
-  subtitle: '#1E40AF',
+  title: '#0F172A',
+  subtitle: '#1F2937',
 };
 
 /** «Muslima Azizova» → «MA» — инициалы оператора для бейджа-квадрата, как в Telegram. */
