@@ -15,11 +15,13 @@ import { ResetLeadModal } from '../components/leads/ResetLeadModal.jsx';
 import { DismissFromBoardModal } from '../components/leads/DismissFromBoardModal.jsx';
 import { DeleteLeadModal } from '../components/students/DeleteLeadModal.jsx';
 import { TrialFormModal } from '../components/leads/TrialFormModal.jsx';
+import { AppointmentModal } from '../components/leads/AppointmentModal.jsx';
 import { GroupBookingModal } from '../components/leads/GroupBookingModal.jsx';
 import { LeadColumn } from '../components/leads/LeadColumn.jsx';
 import { DropdownMenu } from '../components/ui/DropdownMenu.jsx';
 import {
   columnKeyOf,
+  columnRequiresAppointment,
   resolveColumns,
   reorderStageKeys,
   resolveAttemptSlots,
@@ -270,6 +272,7 @@ export function LeadsPage() {
   const [declineTarget, setDeclineTarget] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [trialTarget, setTrialTarget] = useState(null); // { lead, mode: 'schedule'|'reschedule' }
+  const [appointmentTarget, setAppointmentTarget] = useState(null); // { lead, stageKey, move }
   const [bookingTarget, setBookingTarget] = useState(null);
   const [resetTarget, setResetTarget] = useState(null);
   const [dismissTarget, setDismissTarget] = useState(null);
@@ -362,6 +365,10 @@ export function LeadsPage() {
       setDeclineTarget(lead); // окно с причиной отказа
       return;
     }
+    if (columnRequiresAppointment(resolvedColumns.find((c) => c.key === stageKey))) {
+      setAppointmentTarget({ lead, stageKey, move: true }); // окно выбора дня и времени
+      return;
+    }
     advanceStage(db, lead, stageKey, {}, user).catch(() => showToast('Не удалось обновить лид.', { type: 'error' }));
   };
 
@@ -414,6 +421,7 @@ export function LeadsPage() {
     onDelete: (lead) => setDeleteTarget(lead),
     onResetToNew: (lead) => setResetTarget(lead),
     onRescheduleTrial: (lead) => setTrialTarget({ lead, mode: 'reschedule' }),
+    onEditAppointment: (lead) => setAppointmentTarget({ lead, stageKey: columnKeyOf(lead, orderedKeys), move: false }),
     onOpenBooking: (lead) => setBookingTarget(lead),
     // Только «Оплачено» — убирает карточку с доски, студент остаётся в
     // системе (просто не рендерится больше в этом списке, см. leads выше).
@@ -512,6 +520,7 @@ export function LeadsPage() {
       <ResetLeadModal lead={resetTarget} onClose={() => setResetTarget(null)} />
       <DismissFromBoardModal lead={dismissTarget} onClose={() => setDismissTarget(null)} />
       <TrialFormModal target={trialTarget} timeSlots={branchSettings?.trialTimeSlots} onClose={() => setTrialTarget(null)} />
+      <AppointmentModal target={appointmentTarget} onClose={() => setAppointmentTarget(null)} />
       <GroupBookingModal lead={bookingTarget} allLeads={allLeads} onClose={() => setBookingTarget(null)} />
     </div>
   );

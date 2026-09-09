@@ -24,12 +24,12 @@ const TONE_MUTED = 'bg-border text-muted';
 
 /**
  * Название колонки — само служит триггером редактирования (двойной клик),
- * без отдельной иконки-карандаша. Попап правит `label`/`color` и число
- * кружочков-попыток на карточках (`attemptSlots`); ключ стадии и порядок
- * тут не трогаются. Сохранение пишет в
- * `settings/{branchId}.leadStageOverrides.{key}` через `onEdit`.
- * @param {{key: string, label: string, color: string, attemptSlots?: number, custom?: boolean}} props.column
- * @param {(patch: {label: string, color: string, attemptSlots: number}) => void} props.onEdit
+ * без отдельной иконки-карандаша. Попап правит `label`/`color`, число
+ * кружочков-попыток на карточках (`attemptSlots`) и флаг «требует записи»
+ * (`appointment`); ключ стадии и порядок тут не трогаются. Сохранение
+ * пишет в `settings/{branchId}.leadStageOverrides.{key}` через `onEdit`.
+ * @param {{key: string, label: string, color: string, attemptSlots?: number, appointment?: boolean, custom?: boolean}} props.column
+ * @param {(patch: {label: string, color: string, attemptSlots: number, appointment: boolean}) => void} props.onEdit
  * @param {() => void} [props.onRemove] удалить (кастомная) / скрыть (встроенная) колонку
  * @param {boolean} [props.canRemove] в колонке нет карточек
  * @param {(side: 'left' | 'right') => void} [props.onAdd] добавить колонку слева/справа
@@ -39,6 +39,7 @@ function EditableStageTitle({ column, onEdit, onRemove, canRemove, onAdd }) {
   const [label, setLabel] = useState(column.label);
   const [color, setColor] = useState(column.color);
   const [slots, setSlots] = useState(resolveAttemptSlots(column));
+  const [appointment, setAppointment] = useState(Boolean(column.appointment));
   const ref = useRef(null);
 
   useEffect(() => {
@@ -46,6 +47,7 @@ function EditableStageTitle({ column, onEdit, onRemove, canRemove, onAdd }) {
     setLabel(column.label);
     setColor(column.color);
     setSlots(resolveAttemptSlots(column));
+    setAppointment(Boolean(column.appointment));
     const onClickOutside = (e) => {
       if (ref.current && !ref.current.contains(e.target)) setOpen(false);
     };
@@ -62,7 +64,7 @@ function EditableStageTitle({ column, onEdit, onRemove, canRemove, onAdd }) {
     const trimmed = label.trim();
     if (!trimmed) return;
     const clampedSlots = Math.max(0, Math.min(MAX_ATTEMPT_SLOTS, Math.round(Number(slots) || 0)));
-    onEdit({ label: trimmed, color, attemptSlots: clampedSlots });
+    onEdit({ label: trimmed, color, attemptSlots: clampedSlots, appointment });
     setOpen(false);
   };
 
@@ -113,6 +115,20 @@ function EditableStageTitle({ column, onEdit, onRemove, canRemove, onAdd }) {
               onKeyDown={(e) => e.key === 'Enter' && save()}
               className="h-9 w-full rounded-field border border-border-strong bg-white px-2.5 text-[13px] text-text focus:border-navy focus:outline-none"
             />
+          </label>
+          <label className="mb-3 flex items-start gap-2 text-[12px] text-text">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={appointment}
+              onChange={(e) => setAppointment(e.target.checked)}
+            />
+            <span>
+              Требует записи (день и время)
+              <span className="mt-0.5 block text-[11px] text-muted">
+                При переводе в эту колонку откроется окно выбора дня и времени; дата покажется на карточке.
+              </span>
+            </span>
           </label>
           {(onAdd || onRemove) && (
             <div className="mb-3 border-t border-border pt-3">
@@ -413,7 +429,7 @@ function humanizeReasonKey(key) {
  * @param {Map<string, {color?: string, name: string}>} props.operatorByUid
  * @param {() => void} props.onAdd
  * @param {(leadId: string, columnKey: string) => void} props.onDropLead
- * @param {(columnKey: string, patch: {label: string, color: string, attemptSlots: number}) => void} props.onEditColumn
+ * @param {(columnKey: string, patch: {label: string, color: string, attemptSlots: number, appointment: boolean}) => void} props.onEditColumn
  * @param {(draggedKey: string, targetKey: string) => void} [props.onReorderStage] перетаскивание заголовка колонки
  * @param {(stageKey: string) => void} [props.onRemoveStage] удалить/скрыть колонку
  * @param {(anchorKey: string, side: 'left' | 'right') => void} [props.onAddStage] добавить колонку рядом

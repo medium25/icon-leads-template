@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { collection, addDoc, doc, updateDoc, increment, query, where, orderBy, serverTimestamp } from 'firebase/firestore';
-import { CheckCircle2, XCircle, Circle, Snowflake, ArrowRight, PhoneOff, MessageSquare, ListChecks, Clock, Users, X } from 'lucide-react';
+import { CheckCircle2, XCircle, Circle, Snowflake, ArrowRight, PhoneOff, MessageSquare, ListChecks, Clock, Users, X, CalendarClock } from 'lucide-react';
 import { db } from '../../firebase.js';
 import { useAuth } from '../../hooks/useAuth.js';
 import { useCollection } from '../../hooks/useCollection.js';
@@ -406,6 +406,7 @@ function UnreachableBlock({ lead, onMark, onReschedule, onDecline, nextAttemptDu
  * @param {(lead: Object) => void} props.onDecline
  * @param {(lead: Object) => void} props.onDelete полное удаление, только для status=='lead'
  * @param {(lead: Object) => void} props.onRescheduleTrial
+ * @param {(lead: Object) => void} props.onEditAppointment правка дня/времени записи (колонка с `appointment`)
  * @param {(lead: Object) => void} props.onMarkTouch
  * @param {(lead: Object, stageKey: string) => void} props.onMove
  * @param {(lead: Object, result: 'success'|'fail') => void} props.onMarkAttempt
@@ -424,6 +425,7 @@ export function LeadCard({
   onDecline,
   onDelete,
   onRescheduleTrial,
+  onEditAppointment,
   onMarkTouch,
   onMove,
   onMarkAttempt,
@@ -437,8 +439,12 @@ export function LeadCard({
   const stage = lead.funnelStage ?? 'new';
   const isTerminal = stage === 'won' || stage === 'lost';
   const attempts = lead.callAttempts ?? [];
+  const currentColumn = columns.find((c) => c.key === stage);
   // Сколько кружочков-попыток на карточке — настройка текущей колонки.
-  const attemptSlots = resolveAttemptSlots(columns.find((c) => c.key === stage) ?? { key: stage });
+  const attemptSlots = resolveAttemptSlots(currentColumn ?? { key: stage });
+  // Колонка «требует записи» (тест / стажировка / общение) — на карточке
+  // видны день и время, клик открывает окно правки (onEditAppointment).
+  const needsAppointment = Boolean(currentColumn?.appointment);
   const operatorLabel = operatorInitials(operatorName);
   const [commentsOpen, setCommentsOpen] = useState(false);
   const hasComments = (lead.commentsCount ?? 0) > 0;
@@ -583,6 +589,24 @@ export function LeadCard({
           </a>
         )}
       </div>
+
+      {needsAppointment && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onEditAppointment(lead);
+          }}
+          className="flex items-center gap-1.5 self-start rounded-field bg-surface-alt px-2 py-1 text-[12px] font-semibold text-text hover:bg-border/50"
+        >
+          <CalendarClock className="h-3.5 w-3.5 shrink-0 text-muted" />
+          {lead.appointmentAt ? (
+            formatRelativeDeadline(lead.appointmentAt)
+          ) : (
+            <span className="text-muted">Назначить день и время</span>
+          )}
+        </button>
+      )}
 
       {attemptSlots > 0 && (
         <div onClick={(e) => e.stopPropagation()}>

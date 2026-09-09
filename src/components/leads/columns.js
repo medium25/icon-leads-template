@@ -139,8 +139,8 @@ export function makeCustomStageKey() {
 /**
  * Кастомная стадия из настроек → форма колонки (как во встроенном COLUMNS,
  * но без `hint` и спец-поведения). Невалидные записи отсеиваются.
- * @param {Array<{key: string, label: string, color?: string, attemptSlots?: number}>} [customStages]
- * @returns {Array<{key: string, label: string, color: string, custom: true, attemptSlots?: number}>}
+ * @param {Array<{key: string, label: string, color?: string, attemptSlots?: number, appointment?: boolean}>} [customStages]
+ * @returns {Array<{key: string, label: string, color: string, custom: true, attemptSlots?: number, appointment?: boolean}>}
  */
 export function customColumns(customStages) {
   if (!Array.isArray(customStages)) return [];
@@ -152,7 +152,21 @@ export function customColumns(customStages) {
       color: s.color || '#4B5563',
       custom: true,
       ...(Number.isFinite(s.attemptSlots) ? { attemptSlots: s.attemptSlots } : {}),
+      ...(s.appointment ? { appointment: true } : {}),
     }));
+}
+
+/**
+ * Требует ли колонка записи на день и время (настройка стадии
+ * `appointment`) — при переводе карточки в такую колонку открывается окно
+ * выбора дня и времени (тест / стажировка / общение и т.п.), а дата пишется
+ * в `students.appointmentAt` и показывается на карточке. Запись
+ * необязательна: окно можно пропустить и назначить позже.
+ * @param {{appointment?: boolean}} [column]
+ * @returns {boolean}
+ */
+export function columnRequiresAppointment(column) {
+  return Boolean(column?.appointment);
 }
 
 /** Верхний предел кружочков-попыток на карточке (настройка колонки). */
