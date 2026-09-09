@@ -136,8 +136,8 @@ function LeadChecklistPanel({ leadId, checklist }) {
 // текст тёмный того же тона. Не зависит от колонки и состояния. Поменять
 // весь набор тут — поменяется на всех карточках.
 const CARD_HEADER = {
-  bg: '#C6ECDE',
-  border: '#8FD9BF',
+  bg: '#DED0F4',
+  border: '#C1A7EC',
   title: '#0F172A',
   subtitle: '#1F2937',
 };
