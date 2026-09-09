@@ -1,6 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { format } from 'date-fns';
-import { ru } from 'date-fns/locale';
+import { useMemo, useState } from 'react';
 import { collection, addDoc, doc, updateDoc, increment, query, where, orderBy, serverTimestamp } from 'firebase/firestore';
 import { CheckCircle2, XCircle, Circle, Snowflake, ArrowRight, MessageSquare, ListChecks, X, CalendarClock } from 'lucide-react';
 import { db } from '../../firebase.js';
@@ -8,8 +6,8 @@ import { useAuth } from '../../hooks/useAuth.js';
 import { useCollection } from '../../hooks/useCollection.js';
 import { DropdownMenu } from '../ui/DropdownMenu.jsx';
 import { COLUMNS, resolveAttemptSlots, columnRequiresAppointment } from './columns.js';
-import { isPriorityLead, stageDeadline, overdueReasonLabel, LOST_REASON_OPTIONS } from '../../lib/leadFunnel.js';
-import { formatPhone, formatDateTime, formatDateTimeShort, formatRelativeDeadline, formatOverdueBy, formatSource } from '../../lib/format.js';
+import { isPriorityLead, LOST_REASON_OPTIONS } from '../../lib/leadFunnel.js';
+import { formatPhone, formatDateTime, formatDateTimeShort, formatRelativeDeadline, formatSource } from '../../lib/format.js';
 import { LEAD_CHECKLIST_ITEMS, CHECKLIST_RED_FLAGS, CHECKLIST_GREEN_FLAGS, checklistCheckedCount, checklistPercent } from '../../lib/leadChecklist.js';
 
 /**
@@ -134,6 +132,13 @@ function LeadChecklistPanel({ leadId, checklist }) {
   );
 }
 
+/** hex (#RRGGBB) → rgba(...) с заданной прозрачностью — для заливки шапки карточки цветом стадии. */
+function tint(hex, alpha) {
+  const h = (hex || '').replace('#', '');
+  if (h.length !== 6) return `rgba(139, 148, 163, ${alpha})`;
+  return `rgba(${parseInt(h.slice(0, 2), 16)}, ${parseInt(h.slice(2, 4), 16)}, ${parseInt(h.slice(4, 6), 16)}, ${alpha})`;
+}
+
 /** «Muslima Azizova» → «MA» — инициалы оператора для бейджа-квадрата, как в Telegram. */
 export function operatorInitials(name) {
   const parts = (name ?? '').trim().split(/\s+/).filter(Boolean);
@@ -223,45 +228,6 @@ function CallAttemptDots({ attempts, onMark, nextCallDueAt, slots }) {
 }
 
 /**
- * Бейдж «!» в углу карточки (просрочен дедлайн стадии) — клик показывает,
- * что именно просрочено и до какого момента. Тот же трюк с позиционированием
- * относительно карточки, что у LeadInfoPopover (см. ниже) — сам бейдж уже
- * absolute в углу, попап растягивается на всю ширину карточки под ним.
- */
-function OverdueBadge({ reason, deadline, overdueBy }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onClickOutside = (e) => {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
-    };
-    document.addEventListener('mousedown', onClickOutside);
-    return () => document.removeEventListener('mousedown', onClickOutside);
-  }, [open]);
-
-  return (
-    <div ref={ref} className="relative shrink-0" onClick={(e) => e.stopPropagation()}>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-label="Причина просрочки"
-        className="rounded-badge bg-[rgba(225,29,72,0.13)] px-1.5 py-0.5 text-[10px] font-bold text-[#BE123C] dark:bg-[rgba(251,113,133,0.18)] dark:text-[#FDA4AF]"
-      >
-        {overdueBy || 'Просрочено'}
-      </button>
-      {open && (
-        <div className="absolute left-0 top-full z-20 mt-1 w-56 rounded-field border border-border bg-surface p-3 shadow-hover">
-          <p className="text-[13px] font-bold leading-snug text-text">{reason}</p>
-          {deadline && <p className="mt-1 text-[11px] leading-snug text-muted">Срок был до {deadline}</p>}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/**
  * Карточка лида на канбан-доске «Заявки». Перетаскивается мышью (native
  * HTML5 DnD) в любую колонку — терминальные (won/lost) не draggable вовсе.
  * @param {Object} props
@@ -310,8 +276,6 @@ export function LeadCard({
   const checklistPct = checklistPercent(lead.checklist);
 
   const createdAt = lead.createdAt?.toDate?.();
-  const deadline = stageDeadline(lead);
-  const overdue = deadline ? Date.now() > deadline.getTime() : false;
   // priority — метка «лид пришёл вне рабочих часов», актуальна только пока
   // не отработан первый SLA на стадии 'new'; дальше по воронке не показываем.
   const priority = stage === 'new' && createdAt ? isPriorityLead(createdAt) : false;
@@ -382,23 +346,19 @@ export function LeadCard({
       className={`group relative flex min-h-[215px] flex-col gap-2.5 rounded-xl border bg-surface p-3.5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${
         isTerminal ? 'cursor-pointer border-border' : 'cursor-grab border-border hover:border-navy/20 active:cursor-grabbing'
       } ${
-        priority && !overdue ? 'border-l-4 border-l-orange-soft' : ''
+        priority ? 'border-l-4 border-l-orange-soft' : ''
       }`}
     >
-      {/* Шапка карточки — один постоянный цвет (синий), не зависит от
-          состояния лида. Отрицательные margin/rounded-t повторяют
-          скругление карточки, растягивая заливку до самых краёв поверх её
-          собственного p-3.5. */}
-      <div className="-mx-3.5 -mt-3.5 flex items-center justify-between gap-2 rounded-t-xl border-b border-[rgba(47,111,228,0.24)] bg-[rgba(47,111,228,0.09)] px-3.5 pb-2.5 pt-3.5 dark:border-[rgba(96,150,240,0.30)] dark:bg-[rgba(96,150,240,0.13)]">
+      {/* Шапка карточки покрашена цветом текущей колонки (column.color —
+          та же линия, что под заголовком столбца), без завязки на состояние
+          лида. Отрицательные margin/rounded-t повторяют скругление карточки,
+          растягивая заливку до самых краёв поверх её собственного p-3.5. */}
+      <div
+        className="-mx-3.5 -mt-3.5 flex items-center justify-between gap-2 rounded-t-xl border-b px-3.5 pb-2.5 pt-3.5"
+        style={{ backgroundColor: tint(currentColumn?.color, 0.12), borderColor: tint(currentColumn?.color, 0.34) }}
+      >
         <div className="flex min-w-0 items-center gap-1.5">
           <p className="min-w-0 truncate text-[13px] font-bold leading-tight text-text">{lead.fullName}</p>
-          {overdue && (
-            <OverdueBadge
-              reason={overdueReasonLabel(lead)}
-              deadline={deadline ? format(deadline, 'dd.MM.yyyy HH:mm', { locale: ru }) : null}
-              overdueBy={deadline ? formatOverdueBy(deadline) : null}
-            />
-          )}
         </div>
         <div className="flex min-w-0 shrink items-center gap-1">
           {lead.vacancyName && (
